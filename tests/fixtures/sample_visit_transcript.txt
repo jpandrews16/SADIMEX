@@ -1,0 +1,11 @@
+Vendedor: Buenos días caserita, soy Juan de Sadimex, ¿cómo le va hoy?
+Cliente: Bien nomás, ¿qué me trae?
+Vendedor: Le traigo las novedades de Noel y Wild Protein. ¿Cómo está su stock de galletas Festival?
+Cliente: Ya se me acabó, no hay caso, se venden rápido.
+Vendedor: Perfecto, ¿le dejo dos cajas de Festival y una de Saltín? También tengo Wild Protein a precio especial esta semana.
+Cliente: ¿Cuánto me sale todo?
+Vendedor: Festival dos cajas a 45 bolivianos cada una, Saltín 40, y Wild Protein 35. En total 165 bolivianos.
+Cliente: Ya pues, déjeme eso nomás.
+Vendedor: ¡Excelente! Le anoto el pedido. ¿Le puedo visitar el próximo miércoles también?
+Cliente: Sí, venga nomás.
+Vendedor: Muchas gracias caserita, hasta el miércoles entonces.

@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "ultima_actualizacion": "2026-02-21",
+  "marcas": [
+    {
+      "nombre": "Noel",
+      "skus": ["Galletas Festival", "Galletas Saltín", "Galletas Ducales", "Cruz Verde"],
+      "precio_vigente": null,
+      "es_marca_prioritaria": true
+    },
+    {
+      "nombre": "Wild Protein",
+      "skus": ["Wild Protein Chocolate", "Wild Protein Vainilla", "Wild Protein Fresa"],
+      "precio_vigente": null,
+      "es_marca_prioritaria": true
+    }
+  ],
+  "definicion_venta_perfecta": {
+    "descripcion": "Una visita donde el vendedor cumple todos los criterios fundamentales de la metodología de ventas Sadimex.",
+    "criterios": [
+      {
+        "nombre": "saludo_profesional",
+        "peso_ponderacion": 0.10,
+        "descripcion": "El vendedor inicia la visita con saludo apropiado e identificación de la empresa."
+      },
+      {
+        "nombre": "verificacion_stock",
+        "peso_ponderacion": 0.20,
+        "descripcion": "El vendedor verifica el stock existente del cliente antes de ofrecer productos."
+      },
+      {
+        "nombre": "oferta_portafolio_completo",
+        "peso_ponderacion": 0.25,
+        "descripcion": "El vendedor menciona activamente al menos el 70% de las marcas prioritarias del catálogo."
+      },
+      {
+        "nombre": "manejo_precio_correcto",
+        "peso_ponderacion": 0.15,
+        "descripcion": "Los precios ofrecidos corresponden a la lista de precios vigente."
+      },
+      {
+        "nombre": "cierre_efectivo",
+        "peso_ponderacion": 0.20,
+        "descripcion": "El vendedor utiliza técnica de cierre explícita (solicitud de pedido, alternativas, urgencia legítima)."
+      },
+      {
+        "nombre": "despedida_profesional",
+        "peso_ponderacion": 0.10,
+        "descripcion": "El vendedor confirma el pedido, agradece y establece próxima visita."
+      }
+    ]
+  },
+  "umbrales_semaforo": {
+    "verde": 80,
+    "amarillo": 60,
+    "rojo": 0,
+    "descripcion": "verde: score >= 80 | amarillo: score 60-79 | rojo: score < 60"
+  },
+  "jerga_boliviana": [
+    "caserita",
+    "casero",
+    "bono",
+    "combo",
+    "quiebre de stock",
+    "quiebre",
+    "cuánto me das",
+    "fiado",
+    "a crédito",
+    "al contado",
+    "el de siempre",
+    "dame nomás",
+    "ahorita",
+    "un momento no más",
+    "hay nomás",
+    "no hay",
+    "ya se acabó",
+    "en camino",
+    "lo que tienes",
+    "por favor nomás"
+  ],
+  "ciudades": ["LPZ", "CBBA", "SCZ"],
+  "total_vendedores": 13
+}

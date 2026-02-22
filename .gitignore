@@ -1,0 +1,47 @@
+# === Secrets & Env ===
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+
+# === Node ===
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+
+# === macOS ===
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# === Editors ===
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.sw?
+
+# === Temp / Logs ===
+.tmp/
+*.log
+logs/
+
+# === Supabase local ===
+supabase/.branches/
+supabase/.temp/
+
+# === Build scripts (temp) ===
+frontend/create_admin.mjs
