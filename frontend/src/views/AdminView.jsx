@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../auth.js';
 
 const CIUDADES = [
@@ -37,6 +37,7 @@ const inputCls = {
 };
 
 export default function AdminView() {
+    // ── All hooks declared first ──
     const [users, setUsers] = useState([]);
     const [filterRol, setFilterRol] = useState('all');
     const [filterCity, setFilterCity] = useState('all');
@@ -45,6 +46,9 @@ export default function AdminView() {
     const [editingId, setEditingId] = useState(null);
     const [loading, setLoading] = useState(false);
     const [initLoading, setInitLoading] = useState(true);
+    const [success, setSuccess] = useState('');
+    const [error, setError] = useState('');
+    const [form, setForm] = useState({ nombre: '', email: '', password: '', rol: 'vendedor', ciudad: 'LPZ', username: '', avatar_url: '' });
 
     useEffect(() => {
         const fetchUsers = async () => {
@@ -58,33 +62,38 @@ export default function AdminView() {
 
                 const dbUsers = (data || []).map(u => ({
                     ...u,
-                    // Asegurar que tengan email para mostrar en la info
-                    password: '•'.repeat(8) // contraseñas reales no se muestran
+                    password: '•'.repeat(8)
                 }));
-                // Set only real DB users
                 setUsers(dbUsers);
             } catch (err) {
                 console.error(err);
-                setUsers([]); // clear users on error instead of throwing to fallback
+                setUsers([]);
             } finally {
                 setInitLoading(false);
             }
         };
         fetchUsers();
     }, []);
-    const [success, setSuccess] = useState('');
-    const [error, setError] = useState('');
-    const [form, setForm] = useState({ nombre: '', email: '', password: '', rol: 'vendedor', ciudad: 'LPZ', username: '', avatar_url: '' });
 
     const setF = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
-    const filtered = users.filter(u =>
+    // ── Memoized filtered list ──
+    const filtered = useMemo(() => users.filter(u =>
         (filterRol === 'all' || u.rol === filterRol) &&
         (filterCity === 'all' || u.ciudad === filterCity) &&
-        ((u.nombre && u.nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (searchTerm === '' ||
+            (u.nombre && u.nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
             (u.email && u.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
             (u.username && u.username.toLowerCase().includes(searchTerm.toLowerCase())))
-    );
+    ), [users, filterRol, filterCity, searchTerm]);
+
+    // ── Memoized stats ──
+    const stats = useMemo(() => ({
+        total: users.length,
+        activos: users.filter(u => u.activo).length,
+        supervisores: users.filter(u => u.rol === 'supervisor').length,
+        vendedores: users.filter(u => u.rol === 'vendedor').length,
+    }), [users]);
 
     const handleEditClick = (u) => {
         setForm({ nombre: u.nombre, email: u.email, password: '', rol: u.rol, ciudad: u.ciudad, username: u.username || '', avatar_url: u.avatar_url || '' });
@@ -122,7 +131,7 @@ export default function AdminView() {
                     ...form,
                     username: un,
                     activo: true,
-                    password: '•'.repeat(8) // Hidden in UI
+                    password: '•'.repeat(8)
                 };
                 setUsers(prev => [newUser, ...prev]);
                 setSuccess(`✅ Usuario "${form.nombre}" creado exitosamente.`);
@@ -138,16 +147,29 @@ export default function AdminView() {
         }
     };
 
-    const toggleActivo = id => setUsers(prev =>
-        prev.map(u => u.id === id ? { ...u, activo: !u.activo } : u)
-    );
+    // ── CRITICAL FIX: Persist activo toggle to Supabase ──
+    const toggleActivo = useCallback(async (id) => {
+        const user = users.find(u => u.id === id);
+        if (!user) return;
+        const newActivo = !user.activo;
 
-    const stats = {
-        total: users.length,
-        activos: users.filter(u => u.activo).length,
-        supervisores: users.filter(u => u.rol === 'supervisor').length,
-        vendedores: users.filter(u => u.rol === 'vendedor').length,
-    };
+        // Optimistic update
+        setUsers(prev => prev.map(u => u.id === id ? { ...u, activo: newActivo } : u));
+
+        const { error: updateErr } = await supabase
+            .from('sadimex_profiles')
+            .update({ activo: newActivo })
+            .eq('id', id);
+
+        if (updateErr) {
+            // Rollback on failure
+            console.error('Error toggling activo:', updateErr);
+            setUsers(prev => prev.map(u => u.id === id ? { ...u, activo: !newActivo } : u));
+            setError(`Error al cambiar estado: ${updateErr.message}`);
+        } else {
+            setSuccess(`✅ Usuario ${newActivo ? 'activado' : 'desactivado'} exitosamente.`);
+        }
+    }, [users]);
 
     return (
         <div className="animate-in" style={{ padding: '0 10px', maxWidth: 1200, margin: '0 auto', fontFamily: '"Inter", sans-serif' }}>
@@ -158,9 +180,6 @@ export default function AdminView() {
                     <p style={{ fontSize: 13.5, color: '#64748b', margin: 0 }}>Administra tu equipo, roles y permisos de acceso</p>
                 </div>
                 <div style={{ display: 'flex', gap: 12 }}>
-                    <button style={{ ...inputCls, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', background: '#fff' }}>
-                        📥 Bulk Import
-                    </button>
                     <button
                         style={{ ...inputCls, background: '#0f172a', color: '#fff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: 'none' }}
                         onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ nombre: '', email: '', password: '', rol: 'vendedor', ciudad: 'LPZ', username: '', avatar_url: '' }); }}
@@ -170,11 +189,11 @@ export default function AdminView() {
                 </div>
             </div>
 
-            {/* ── KPI CARDS (Matching requested interface) ── */}
+            {/* ── KPI CARDS ── */}
             <div className="kpi-grid" style={{ gap: 15, marginBottom: 24 }}>
                 {[
-                    { label: 'Total Usuarios', val: stats.total, badge: '+12%', color: '#10b981', bg: '#dcfce7', icon: '👥' },
-                    { label: 'Usuarios Activos', val: stats.activos, badge: '+3%', color: '#10b981', bg: '#dcfce7', icon: '✨' },
+                    { label: 'Total Usuarios', val: stats.total, badge: `${stats.total} registrados`, color: '#10b981', bg: '#dcfce7', icon: '👥' },
+                    { label: 'Usuarios Activos', val: stats.activos, badge: `${Math.round((stats.activos / (stats.total || 1)) * 100)}% activos`, color: '#10b981', bg: '#dcfce7', icon: '✨' },
                     { label: 'Supervisores', val: stats.supervisores, badge: 'Roles clave', color: '#6366f1', bg: '#e0e7ff', icon: '👔' },
                     { label: 'Vendedores', val: stats.vendedores, badge: 'Fuerza de venta', color: '#f59e0b', bg: '#fef3c7', icon: '🏃' },
                 ].map(s => (
@@ -289,11 +308,10 @@ export default function AdminView() {
                             <option value="all">Ciudad: Todas</option>
                             {CIUDADES.map(c => <option key={c.val} value={c.val}>{c.label}</option>)}
                         </select>
-                        <button style={{ ...inputCls, cursor: 'pointer', background: '#fff', fontWeight: 600 }}>⚙️ Filtros</button>
                     </div>
                 </div>
 
-                {/* ── Redesigned Table ── */}
+                {/* ── Table ── */}
                 <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                         <thead>
@@ -304,7 +322,7 @@ export default function AdminView() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.map((u, i) => {
+                            {filtered.map((u) => {
                                 const rc = ROL_COLORS[u.rol] || ROL_COLORS.vendedor;
 
                                 return (
@@ -316,7 +334,12 @@ export default function AdminView() {
                                         <td style={{ padding: '16px 20px' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                                 <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#f1f5f9', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                                    <img src={u.avatar_url ? u.avatar_url : `https://api.dicebear.com/7.x/notionists/svg?seed=${u.username || u.nombre}&backgroundColor=transparent`} alt="" style={{ width: 40, height: 40, objectFit: 'cover' }} />
+                                                    <img
+                                                        src={u.avatar_url ? u.avatar_url : `https://api.dicebear.com/7.x/notionists/svg?seed=${u.username || u.nombre}&backgroundColor=transparent`}
+                                                        alt=""
+                                                        loading="lazy"
+                                                        style={{ width: 40, height: 40, objectFit: 'cover' }}
+                                                    />
                                                 </div>
                                                 <div>
                                                     <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>{u.nombre}</div>
@@ -324,25 +347,23 @@ export default function AdminView() {
                                                 </div>
                                             </div>
                                         </td>
-                                        {/* COL 1.5: Username */}
+                                        {/* COL 2: Username */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', fontFamily: 'monospace' }}>@{u.username || u.email?.split('@')[0]}</span>
                                         </td>
-                                        {/* COL 2: Team/Role (Categoría) */}
+                                        {/* COL 3: Role */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <span style={{ background: rc.bg, color: rc.color, borderRadius: 6, padding: '4px 8px', fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
                                                 {rc.badge}
                                             </span>
                                         </td>
-
-                                        {/* COL 3: Región */}
+                                        {/* COL 4: Región */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                                                 <span>{getCiudadIcon(u.ciudad)}</span> {u.ciudad === 'NACIONAL' ? 'Nacional' : u.ciudad}
                                             </span>
                                         </td>
-
-                                        {/* COL 3: Credentials (Username & Password) */}
+                                        {/* COL 5: Credentials */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <div style={{ fontSize: 12, color: '#334155', display: 'flex', flexDirection: 'column', gap: 4, fontFamily: 'monospace' }}>
                                                 <strong style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'inherit' }}>{u.username}</strong>
@@ -351,8 +372,7 @@ export default function AdminView() {
                                                 </div>
                                             </div>
                                         </td>
-
-                                        {/* COL 4: Plan Status (Activo/Inactivo UI) */}
+                                        {/* COL 6: Estado */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <span style={{
                                                 background: u.activo ? '#dcfce7' : '#fee2e2',
@@ -363,13 +383,11 @@ export default function AdminView() {
                                                 {u.activo ? 'Activo' : 'Suspendido'}
                                             </span>
                                         </td>
-
-                                        {/* COL 5: App Permisions (Acceso / Restringido) */}
+                                        {/* COL 7: App Permissions */}
                                         <td style={{ padding: '16px 20px', fontSize: 12.5, color: '#475569', fontWeight: 500 }}>
                                             {u.activo ? 'Concedido' : 'Restringido'}
                                         </td>
-
-                                        {/* COL 6: Actions */}
+                                        {/* COL 8: Actions */}
                                         <td style={{ padding: '16px 20px' }}>
                                             <div style={{ display: 'flex', gap: 8 }}>
                                                 <button
@@ -396,7 +414,7 @@ export default function AdminView() {
                             })}
                             {filtered.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
+                                    <td colSpan={8} style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
                                         <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.5 }}>🕵️‍♂️</div>
                                         No se encontraron usuarios con esos filtros.
                                     </td>

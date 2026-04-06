@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+/* Font loaded via <link preload> in index.html for non-blocking render */
 
 /* ─── Sadimex Brand Tokens ─── */
 :root {
@@ -826,6 +826,13 @@ body {
 .pulse {
   animation: pulse 1.8s infinite;
 }
+
+/* ─── Waveform Animations (UploadAudio) ─── */
+@keyframes wave-0 { from { height: 20% } to { height: 80% } }
+@keyframes wave-1 { from { height: 30% } to { height: 60% } }
+@keyframes wave-2 { from { height: 50% } to { height: 95% } }
+@keyframes wave-3 { from { height: 15% } to { height: 70% } }
+@keyframes spin { to { transform: rotate(360deg) } }
 
 /* ─── Responsive ─── */
 @media (max-width: 900px) {

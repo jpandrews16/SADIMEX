@@ -25,18 +25,10 @@ function Waveform({ active }) {
                 <div key={i} style={{
                     width: 4, borderRadius: 2,
                     background: active ? 'var(--blue)' : 'var(--bg-4)',
-                    height: active ? `${20 + Math.random() * 50}%` : '20%',
-                    transition: active ? 'height 0.12s ease' : 'none',
+                    height: '20%',
                     animation: active ? `wave-${i % 4} 0.${5 + i % 4}s infinite alternate ease-in-out` : 'none',
                 }} />
             ))}
-            <style>{`
-        @keyframes wave-0 { from{height:20%} to{height:80%} }
-        @keyframes wave-1 { from{height:30%} to{height:60%} }
-        @keyframes wave-2 { from{height:50%} to{height:95%} }
-        @keyframes wave-3 { from{height:15%} to{height:70%} }
-        @keyframes spin { to{transform:rotate(360deg)} }
-      `}</style>
         </div>
     );
 }
@@ -129,8 +121,7 @@ export default function UploadAudio() {
     }, [audioURL]);
 
     /* ─── pipeline simulation ─── */
-    const sourceFile = recBlob ? file : file;
-    const canSubmit = sourceFile && form.cliente && form.vendedor && !processing;
+    const canSubmit = file && form.cliente && form.vendedor && !processing;
 
     const simulate = async () => {
         setProcessing(true); setDone(false);

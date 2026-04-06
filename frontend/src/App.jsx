@@ -1,20 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar.jsx';
-import GerenciaView from './views/GerenciaView.jsx';
-import SupervisorView from './views/SupervisorView.jsx';
-import VendedorView from './views/VendedorView.jsx';
-import UploadAudio from './views/UploadAudio.jsx';
-import AdminView from './views/AdminView.jsx';
 import LoginPage from './views/LoginPage.jsx';
 import { supabase, logout } from './auth.js';
 import './index.css';
 
-const VIEW_MAP = {
-  admin: <AdminView />,
-  gerencia: <GerenciaView />,
-  supervisor: <SupervisorView />,
-  vendedor: <VendedorView />,
-  upload: <UploadAudio />,
+// Lazy-load views — each user role only downloads the code they need
+const GerenciaView = lazy(() => import('./views/GerenciaView.jsx'));
+const SupervisorView = lazy(() => import('./views/SupervisorView.jsx'));
+const VendedorView = lazy(() => import('./views/VendedorView.jsx'));
+const UploadAudio = lazy(() => import('./views/UploadAudio.jsx'));
+const AdminView = lazy(() => import('./views/AdminView.jsx'));
+
+// Map view keys to component constructors (not instances)
+const VIEW_COMPONENTS = {
+  admin: AdminView,
+  gerencia: GerenciaView,
+  supervisor: SupervisorView,
+  vendedor: VendedorView,
+  upload: UploadAudio,
 };
 
 const ROL_DEFAULT_VIEW = {
@@ -23,6 +26,18 @@ const ROL_DEFAULT_VIEW = {
   supervisor: 'supervisor',
   vendedor: 'vendedor',
 };
+
+function LoadingFallback() {
+  return (
+    <div style={{
+      display: 'flex', height: '60vh', alignItems: 'center', justifyContent: 'center',
+      color: 'var(--text-3)', fontFamily: 'Inter', fontSize: 13, fontWeight: 600,
+      letterSpacing: '1px', textTransform: 'uppercase',
+    }}>
+      ⏳ Cargando módulo...
+    </div>
+  );
+}
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -85,11 +100,11 @@ export default function App() {
     }} />;
   }
 
-  // ── App Shell ─────────────────────────────
-  const activeView = view === 'admin'
-    ? <AdminView currentUser={currentUser} />
-    : VIEW_MAP[view] || <GerenciaView />;
+  // ── Render active view dynamically ─────────
+  const ActiveComponent = VIEW_COMPONENTS[view] || GerenciaView;
+  const viewProps = (view === 'admin') ? { currentUser } : {};
 
+  // ── App Shell ─────────────────────────────
   return (
     <div className="app-shell">
       <Sidebar
@@ -100,7 +115,9 @@ export default function App() {
         onLogout={handleLogout}
       />
       <main className="main-content">
-        {activeView}
+        <Suspense fallback={<LoadingFallback />}>
+          <ActiveComponent {...viewProps} />
+        </Suspense>
       </main>
     </div>
   );
