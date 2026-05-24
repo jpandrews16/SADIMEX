@@ -2,5 +2,12 @@
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "installCommand": "cd frontend && npm install",
-  "framework": null
+  "framework": null,
+  "env": {
+    "VITE_SUPABASE_URL": "https://rdhderpzkbhsargdvlvc.supabase.co",
+    "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkaGRlcnB6a2Joc2FyZ2R2bHZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyOTY2NzMsImV4cCI6MjA4Njg3MjY3M30.J9LLR8MOSE7a2lbIKn-UFmnNRHF1vhK1HXm0QA475A4"
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
 }
