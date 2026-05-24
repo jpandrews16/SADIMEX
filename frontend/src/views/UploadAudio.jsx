@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
-/* ─── helpers ─── */
 const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
 const STEPS = [
-    { icon: "📥", label: "Ingesta y validación" },
-    { icon: "☁️", label: "Subida a Gemini Files API" },
-    { icon: "🎙️", label: "Transcripción + diarización" },
-    { icon: "📊", label: "Extracción de KPIs — Gemini 2.5 Flash" },
+    { icon: "📥", label: "Validando archivo de audio" },
+    { icon: "☁️", label: "Enviando a OpenAI Whisper" },
+    { icon: "🎙️", label: "Transcribiendo con gpt-4o" },
+    { icon: "💾", label: "Guardando en base de datos" },
 ];
 
 const inputStyle = {
@@ -17,7 +16,6 @@ const inputStyle = {
     outline: "none", fontFamily: "inherit", transition: "border-color 0.15s",
 };
 
-/* ─── Waveform bars (animated while recording) ─── */
 function Waveform({ active }) {
     return (
         <div style={{ display: 'flex', gap: 3, alignItems: 'center', height: 36 }}>
@@ -33,6 +31,8 @@ function Waveform({ active }) {
     );
 }
 
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
 export default function UploadAudio() {
     /* ── file upload state ── */
     const [file, setFile] = useState(null);
@@ -40,7 +40,7 @@ export default function UploadAudio() {
     const inputRef = useRef();
 
     /* ── recorder state ── */
-    const [recState, setRecState] = useState("idle");   // idle | requesting | recording | stopped
+    const [recState, setRecState] = useState("idle");
     const [recSeconds, setRecSeconds] = useState(0);
     const [recBlob, setRecBlob] = useState(null);
     const [recError, setRecError] = useState("");
@@ -54,10 +54,12 @@ export default function UploadAudio() {
     const [form, setForm] = useState({ vendedor: "", ciudad: "LPZ", cliente: "" });
     const setField = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
-    /* ── pipeline simulation ── */
+    /* ── pipeline state ── */
     const [currentStep, setCurrentStep] = useState(0);
     const [processing, setProcessing] = useState(false);
     const [done, setDone] = useState(false);
+    const [submitError, setSubmitError] = useState("");
+    const [transcript, setTranscript] = useState(null);
 
     /* ─── recorder logic ─── */
     const startRecording = useCallback(async () => {
@@ -67,7 +69,9 @@ export default function UploadAudio() {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
 
-            const mr = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg" });
+            const mr = new MediaRecorder(stream, {
+                mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg"
+            });
             mediaRecRef.current = mr;
             chunksRef.current = [];
 
@@ -75,7 +79,8 @@ export default function UploadAudio() {
             mr.onstop = () => {
                 const blob = new Blob(chunksRef.current, { type: mr.mimeType });
                 const url = URL.createObjectURL(blob);
-                const f = new File([blob], `grabacion_${Date.now()}.webm`, { type: blob.type });
+                const ext = mr.mimeType.includes("ogg") ? "ogg" : "webm";
+                const f = new File([blob], `grabacion_${Date.now()}.${ext}`, { type: blob.type });
                 setRecBlob(blob);
                 setAudioURL(url);
                 setFile(f);
@@ -83,7 +88,7 @@ export default function UploadAudio() {
                 streamRef.current?.getTracks().forEach(t => t.stop());
             };
 
-            mr.start(200);   // collect every 200 ms
+            mr.start(200);
             setRecState("recording");
             setRecSeconds(0);
             timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
@@ -113,25 +118,65 @@ export default function UploadAudio() {
         setFile(null);
     }, [audioURL]);
 
-    // cleanup on unmount
     useEffect(() => () => {
         clearInterval(timerRef.current);
         streamRef.current?.getTracks().forEach(t => t.stop());
         if (audioURL) URL.revokeObjectURL(audioURL);
     }, [audioURL]);
 
-    /* ─── pipeline simulation ─── */
+    /* ─── submit real ─── */
     const canSubmit = file && form.cliente && form.vendedor && !processing;
 
-    const simulate = async () => {
-        setProcessing(true); setDone(false);
-        for (let i = 1; i <= 4; i++) { setCurrentStep(i); await new Promise(r => setTimeout(r, 1700 + i * 220)); }
-        setDone(true); setProcessing(false);
+    const submit = async () => {
+        if (!canSubmit) return;
+        setProcessing(true);
+        setDone(false);
+        setSubmitError("");
+        setCurrentStep(1);
+
+        try {
+            await delay(350);
+            setCurrentStep(2);
+
+            const fd = new FormData();
+            fd.append("audio", file, file.name);
+            fd.append("source", recBlob ? "microphone" : "file");
+            fd.append("vendedor", form.vendedor);
+            fd.append("ciudad", form.ciudad);
+            fd.append("cliente", form.cliente);
+
+            setCurrentStep(3);
+
+            const res = await fetch('/api/transcribe-audio', {
+                method: "POST",
+                body: fd,
+            });
+
+            setCurrentStep(4);
+            const data = await res.json();
+
+            if (!res.ok || !data.ok) throw new Error(data.error || "Error desconocido en la transcripción");
+
+            await delay(300);
+            setTranscript(data);
+            setDone(true);
+        } catch (err) {
+            setSubmitError(err.message);
+        } finally {
+            setProcessing(false);
+        }
     };
 
     const reset = () => {
-        setDone(false); setFile(null); setCurrentStep(0);
-        setRecBlob(null); setAudioURL(""); setRecState("idle"); setRecSeconds(0);
+        setDone(false);
+        setFile(null);
+        setCurrentStep(0);
+        setRecBlob(null);
+        setAudioURL("");
+        setRecState("idle");
+        setRecSeconds(0);
+        setTranscript(null);
+        setSubmitError("");
     };
 
     /* ───────────── RENDER ───────────── */
@@ -158,7 +203,6 @@ export default function UploadAudio() {
                                 </div>
                             )}
 
-                            {/* Recording status card */}
                             <div style={{
                                 background: recState === "recording" ? 'var(--blue-50)' : 'var(--bg-2)',
                                 border: `1.5px solid ${recState === "recording" ? 'var(--blue)' : 'var(--border)'}`,
@@ -167,7 +211,6 @@ export default function UploadAudio() {
                                 display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14,
                                 transition: 'all 0.3s',
                             }}>
-                                {/* Mic icon / stop icon */}
                                 <div style={{
                                     width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
                                     background: recState === "recording" ? 'var(--blue)' : 'var(--bg-3)',
@@ -207,7 +250,6 @@ export default function UploadAudio() {
                                 )}
                             </div>
 
-                            {/* Controls */}
                             {recState === "idle" && (
                                 <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={startRecording}>
                                     🎙️ Iniciar Grabación
@@ -219,7 +261,6 @@ export default function UploadAudio() {
                                 </button>
                             )}
 
-                            {/* Playback */}
                             {audioURL && (
                                 <div style={{ marginTop: 14 }}>
                                     <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 7 }}>Reproducir antes de enviar</div>
@@ -284,13 +325,19 @@ export default function UploadAudio() {
                             ))}
                         </div>
 
+                        {submitError && (
+                            <div style={{ background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--r-sm)', padding: '12px 16px', fontSize: 13, color: 'var(--red)' }}>
+                                ❌ {submitError}
+                            </div>
+                        )}
+
                         <button
                             className="btn btn-primary"
                             style={{ width: '100%', justifyContent: 'center', opacity: canSubmit ? 1 : 0.5, fontSize: 14, padding: '11px 0' }}
                             disabled={!canSubmit}
-                            onClick={simulate}
+                            onClick={submit}
                         >
-                            {processing ? "⚙️ Analizando con Gemini 2.5…" : "🚀 Enviar y Analizar"}
+                            {processing ? "⚙️ Transcribiendo con OpenAI…" : "🚀 Enviar y Transcribir"}
                         </button>
                     </div>
 
@@ -334,11 +381,10 @@ export default function UploadAudio() {
                             })}
                         </div>
 
-                        {/* Info box */}
                         <div className="card mt-16" style={{ background: 'var(--blue-50)', borderColor: 'var(--blue-100)' }}>
                             <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.65 }}>
                                 <strong style={{ color: 'var(--blue)' }}>Privacidad</strong><br /><br />
-                                Tu micrófono solo se activa cuando presionas <em>"Iniciar Grabación"</em> y se detiene al finalizar. El audio se envía únicamente al servidor Sadimex y a la API de Gemini 2.5 Pro para su análisis. Ningún tercero tiene acceso.
+                                El audio se envía únicamente al servidor Sadimex y a la API de OpenAI para su transcripción. Ningún tercero tiene acceso.
                             </div>
                         </div>
 
@@ -351,15 +397,49 @@ export default function UploadAudio() {
                     </div>
                 </div>
             ) : (
-                <div className="animate-in card" style={{ textAlign: 'center', padding: '56px 36px', borderColor: '#86efac', background: '#f0fdf4' }}>
-                    <div style={{ fontSize: 44, marginBottom: 14 }}>🎉</div>
-                    <h3 style={{ fontSize: 20, fontWeight: 800, color: '#15803d', marginBottom: 8 }}>¡Análisis Completado!</h3>
-                    <p style={{ color: 'var(--text-2)', marginBottom: 24 }}>
-                        La visita a <strong style={{ color: 'var(--text-1)' }}>{form.cliente}</strong> fue procesada con éxito.
-                    </p>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                /* ── SUCCESS: mostrar transcripción real ── */
+                <div className="animate-in">
+                    <div className="card" style={{ textAlign: 'center', padding: '40px 36px 32px', borderColor: '#86efac', background: '#f0fdf4', marginBottom: 20 }}>
+                        <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
+                        <h3 style={{ fontSize: 20, fontWeight: 800, color: '#15803d', marginBottom: 6 }}>¡Transcripción Completada!</h3>
+                        <p style={{ color: 'var(--text-2)', marginBottom: 6 }}>
+                            Visita a <strong style={{ color: 'var(--text-1)' }}>{form.cliente}</strong> guardada en base de datos.
+                        </p>
+                        {transcript?.duration_seconds && (
+                            <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+                                <span className="pill pill-green">⏱ {fmt(Math.round(transcript.duration_seconds))}</span>
+                                <span className="pill pill-green">🌐 {transcript.language?.toUpperCase() || 'ES'}</span>
+                                {transcript.confidence_score != null && (
+                                    <span className="pill pill-green">
+                                        📊 Confianza {Math.round(transcript.confidence_score * 100)}%
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {transcript?.raw_text && (
+                        <div className="card" style={{ marginBottom: 20 }}>
+                            <div className="section-title">🎙️ Transcripción</div>
+                            <div style={{
+                                background: 'var(--bg-2)', borderRadius: 'var(--r-sm)',
+                                padding: '16px 18px', fontSize: 14, color: 'var(--text-1)',
+                                lineHeight: 1.75, whiteSpace: 'pre-wrap', maxHeight: 400,
+                                overflowY: 'auto', border: '1px solid var(--border)',
+                            }}>
+                                {transcript.raw_text}
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 10 }}>
                         <button className="btn btn-primary" onClick={reset}>🎙️ Nueva grabación</button>
-                        <button className="btn btn-ghost">📋 Ver mi reporte</button>
+                        <button
+                            className="btn btn-ghost"
+                            onClick={() => navigator.clipboard?.writeText(transcript?.raw_text || '')}
+                        >
+                            📋 Copiar texto
+                        </button>
                     </div>
                 </div>
             )}
