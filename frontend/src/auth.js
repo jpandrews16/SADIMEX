@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rdhderpzkbhsargdvlvc.supabase.co';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkaGRlcnB6a2Joc2FyZ2R2bHZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyOTY2NzMsImV4cCI6MjA4Njg3MjY3M30.J9LLR8MOSE7a2lbIKn-UFmnNRHF1vhK1HXm0QA475A4';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://svftktwdyekxzvylwvom.supabase.co';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_tnGw3JvB6XtexMb6lCXpZw_aHLZLjNF';
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function authenticate(loginKey, password) {

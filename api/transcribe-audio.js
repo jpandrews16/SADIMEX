@@ -116,7 +116,8 @@ export default async function handler(req) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
-const env  = k => process.env[k] ?? '';
+const SUPABASE_URL_DEFAULT      = 'https://svftktwdyekxzvylwvom.supabase.co';
+const env  = k => process.env[k] ?? (k === 'SUPABASE_URL' ? SUPABASE_URL_DEFAULT : '');
 const json = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const err  = (e, s = 400) => json({ error: e }, s);
 const supabaseGet = (url, headers) => fetch(url, { headers });
