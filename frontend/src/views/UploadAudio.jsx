@@ -1,11 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../auth.js';
 
-const CIUDADES = [
-    { value: 'LPZ',  label: 'La Paz' },
-    { value: 'CBBA', label: 'Cochabamba' },
-    { value: 'SCZ',  label: 'Santa Cruz' },
-];
+const CIUDAD_LABEL = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
 
 const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -118,11 +114,8 @@ function ProgressBar() {
 
 export default function UploadAudio({ currentUser }) {
     /* ── form ── */
-    const savedCity = localStorage.getItem('sadimex_ciudad') || 'LPZ';
-    const [ciudad, setCiudad] = useState(savedCity);
+    const ciudad = currentUser?.ciudad || 'LPZ';
     const [cliente, setCliente] = useState('');
-
-    const handleCiudad = v => { setCiudad(v); localStorage.setItem('sadimex_ciudad', v); };
 
     /* ── recorder ── */
     const [recState, setRecState] = useState('idle'); // idle | requesting | recording | stopped
@@ -247,7 +240,7 @@ export default function UploadAudio({ currentUser }) {
                 <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
                 <h3 style={{ fontSize: 20, fontWeight: 800, color: '#15803d', marginBottom: 6 }}>¡Visita registrada!</h3>
                 <p style={{ color: 'var(--text-2)', fontSize: 13 }}>
-                    <strong>{cliente}</strong> · {CIUDADES.find(c => c.value === ciudad)?.label}
+                    <strong>{cliente}</strong> · {CIUDAD_LABEL[ciudad] || ciudad}
                 </p>
                 {transcript?.duration_seconds && (
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
@@ -301,20 +294,6 @@ export default function UploadAudio({ currentUser }) {
                     <div style={{ ...inputSt, color: 'var(--text-3)', background: 'var(--bg-3)', cursor: 'default' }}>
                         {currentUser?.nombre || currentUser?.email || '—'}
                     </div>
-                </div>
-
-                {/* Ciudad */}
-                <div style={{ marginBottom: 14 }}>
-                    <label style={labelSt}>Ciudad</label>
-                    <select
-                        value={ciudad}
-                        onChange={e => handleCiudad(e.target.value)}
-                        style={{ ...inputSt, cursor: 'pointer' }}
-                    >
-                        {CIUDADES.map(c => (
-                            <option key={c.value} value={c.value}>{c.label}</option>
-                        ))}
-                    </select>
                 </div>
 
                 {/* Cliente con autocomplete */}

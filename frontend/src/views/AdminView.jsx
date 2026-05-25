@@ -119,12 +119,20 @@ export default function AdminView() {
                 setUsers(prev => prev.map(u => u.id === editingId ? { ...u, ...form, username: un } : u));
                 setSuccess(`✅ Usuario "${form.nombre}" actualizado exitosamente.`);
             } else {
-                // CREATE IN SUPABASE EDGE FUNCTION
-                const { data, error: fnError } = await supabase.functions.invoke('create-sadimex-user', {
-                    body: { ...form, username: un }
-                });
+                // CREATE VIA VERCEL API FUNCTION
+                const { data: { session } } = await supabase.auth.getSession();
+                const token = session?.access_token;
 
-                if (fnError || data?.error) throw new Error(fnError?.message || data?.error);
+                const apiRes = await fetch('/api/create-user', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ ...form, username: un }),
+                });
+                const data = await apiRes.json();
+                if (!apiRes.ok || !data.ok) throw new Error(data.error || 'Error al crear usuario');
 
                 const newUser = {
                     id: data.user?.id || Date.now(),
