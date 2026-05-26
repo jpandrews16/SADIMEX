@@ -102,7 +102,7 @@ export default function App() {
 
   // ── Render active view dynamically ─────────
   const ActiveComponent = VIEW_COMPONENTS[view] || GerenciaView;
-  const viewProps = (view === 'admin' || view === 'upload') ? { currentUser } : {};
+  const viewProps = { currentUser };
 
   // ── App Shell ─────────────────────────────
   return (

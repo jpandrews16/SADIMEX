@@ -1,130 +1,207 @@
-import { useState } from 'react';
-import { mockScorecardsLPZ } from '../data/mockData.js';
-import Semaforo from '../components/Semaforo.jsx';
-import ScoreRing from '../components/ScoreRing.jsx';
+import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../auth.js';
 
-const scoreStyle = s => s >= 80 ? "#16a34a" : s >= 60 ? "#b45309" : "#dc2626";
+const CIUDAD = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
 
-export default function SupervisorView() {
-    const [selected, setSelected] = useState(null);
-    const team = mockScorecardsLPZ;
-    const verdes = team.filter(v => v.semaforo === "verde").length;
-    const rojos = team.filter(v => v.semaforo === "rojo").length;
+const fmtDate = d => {
+    const diff = (Date.now() - new Date(d)) / 1000;
+    if (diff < 3600) return `hace ${Math.round(diff / 60)} min`;
+    if (diff < 86400) return `hace ${Math.round(diff / 3600)} h`;
+    if (diff < 172800) return 'ayer';
+    return new Date(d).toLocaleDateString('es-BO', { day: '2-digit', month: 'short' });
+};
+const fmtDur = s => s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '—';
+
+function ConfBadge({ c }) {
+    if (c == null) return <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>;
+    const pct = Math.round(c * 100);
+    const [color, bg] = c >= 0.85 ? ['#16a34a', '#dcfce7'] : c >= 0.65 ? ['#b45309', '#fef3c7'] : ['#dc2626', '#fee2e2'];
+    return <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 7px', borderRadius: 99 }}>{pct}%</span>;
+}
+
+export default function SupervisorView({ currentUser }) {
+    const [visits, setVisits] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [search, setSearch] = useState('');
+    const [expanded, setExpanded] = useState(null);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            fetch('/api/visits', {
+                headers: { Authorization: `Bearer ${session?.access_token}` },
+            })
+                .then(r => r.json())
+                .then(d => {
+                    if (!d.ok) setError(d.error || 'Error al cargar');
+                    else setVisits(d.visits || []);
+                })
+                .catch(e => setError(e.message))
+                .finally(() => setLoading(false));
+        });
+    }, [currentUser?.id]);
+
+    const thisWeek = useMemo(
+        () => visits.filter(v => (Date.now() - new Date(v.created_at)) / 86400000 < 7).length,
+        [visits]
+    );
+
+    // Agrupar por vendedor
+    const byVendedor = useMemo(() => {
+        const map = {};
+        visits.forEach(v => {
+            const name = v.metadata?.vendedor || 'Sin nombre';
+            if (!map[name]) map[name] = { name, count: 0, last: null };
+            map[name].count++;
+            if (!map[name].last || v.created_at > map[name].last) map[name].last = v.created_at;
+        });
+        return Object.values(map).sort((a, b) => b.count - a.count);
+    }, [visits]);
+
+    const avgDur = useMemo(() => {
+        const withDur = visits.filter(v => v.duration_seconds);
+        if (!withDur.length) return null;
+        return withDur.reduce((a, v) => a + v.duration_seconds, 0) / withDur.length;
+    }, [visits]);
+
+    const filtered = useMemo(() =>
+        visits.filter(v =>
+            !search ||
+            (v.metadata?.cliente || '').toLowerCase().includes(search.toLowerCase()) ||
+            (v.metadata?.vendedor || '').toLowerCase().includes(search.toLowerCase())
+        ),
+        [visits, search]
+    );
+
+    if (loading) return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '40vh', color: 'var(--text-3)', fontSize: 13 }}>
+            Cargando equipo...
+        </div>
+    );
+
+    const cityName = CIUDAD[currentUser?.ciudad] || currentUser?.ciudad || '';
 
     return (
         <div className="animate-in">
             <div className="page-header">
                 <div className="flex-between">
                     <div>
-                        <h2>Mi Equipo — La Paz</h2>
-                        <p>Semana 07 · {team.length} vendedores activos · Supervisora: Ingrid Salazar</p>
+                        <h2>Mi Equipo — {cityName}</h2>
+                        <p>{byVendedor.length} vendedores · {visits.length} visitas registradas</p>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <span className="pill pill-green">✅ {verdes} verde</span>
-                        <span className="pill pill-red">🚨 {rojos} rojo</span>
-                    </div>
+                    <span className="pill pill-green">● En vivo</span>
                 </div>
             </div>
 
-            {/* Vendor cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-                {team.map(v => (
-                    <div
-                        key={v.vendedor_id}
-                        className="card"
-                        style={{
-                            cursor: 'pointer',
-                            borderColor: selected === v.vendedor_id ? 'var(--blue)' : undefined,
-                            boxShadow: selected === v.vendedor_id ? 'var(--shadow-blue)' : undefined,
-                        }}
-                        onClick={() => setSelected(selected === v.vendedor_id ? null : v.vendedor_id)}
-                    >
-                        {/* Header row */}
-                        <div className="flex-between" style={{ marginBottom: 16 }}>
-                            <div>
-                                <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 14 }}>{v.nombre}</div>
-                                <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>{v.visitas} visitas · sem. 07</div>
-                            </div>
-                            <ScoreRing score={v.score} size={60} />
-                        </div>
+            {error && (
+                <div style={{ background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--r-sm)', padding: '12px 16px', fontSize: 13, color: 'var(--red)', marginBottom: 16 }}>
+                    ⚠️ {error}
+                </div>
+            )}
 
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                            <Semaforo estado={v.semaforo} />
-                            <span className="pill pill-blue">🤝 {Math.round(v.tasa_cierre * 100)}% cierre</span>
-                            {v.marcas_brecha.length > 0 && (
-                                <span className="pill pill-red">⚠️ Brecha</span>
-                            )}
-                        </div>
-
-                        <div className="score-bar-wrap">
-                            <div className="score-bar-track">
-                                <div
-                                    className={`score-bar-fill ${v.semaforo === 'verde' ? 'green' : v.semaforo === 'rojo' ? 'red' : 'yellow'}`}
-                                    style={{ width: `${v.score}%` }}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Expanded detail */}
-                        {selected === v.vendedor_id && (
-                            <div className="animate-in" style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-                                <table style={{ width: '100%', fontSize: 12.5 }}>
-                                    <tbody>
-                                        {[
-                                            ["VP Rate", `${Math.round(v.vp_rate * 100)}%`],
-                                            ["Tendencia", v.tendencia === "mejorando" ? "↑ Mejorando" : v.tendencia === "deteriorando" ? "↓ Deteriorando" : "→ Estable"],
-                                            ["Brecha", v.marcas_brecha.length ? v.marcas_brecha.join(", ") : "Sin brecha"],
-                                        ].map(([k, val]) => (
-                                            <tr key={k}>
-                                                <td style={{ color: 'var(--text-3)', paddingBottom: 6 }}>{k}</td>
-                                                <td style={{ fontWeight: 700, color: 'var(--text-1)', textAlign: 'right', paddingBottom: 6 }}>{val}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                <button className="btn btn-primary mt-16" style={{ width: '100%', justifyContent: 'center', fontSize: 12.5 }}>
-                                    📤 Enviar Coaching
-                                </button>
-                            </div>
-                        )}
+            {/* KPIs */}
+            <div className="kpi-grid" style={{ marginBottom: 24 }}>
+                {[
+                    { icon: '📋', label: 'Total visitas', val: visits.length, cls: 'blue' },
+                    { icon: '📅', label: 'Esta semana', val: thisWeek, cls: 'green' },
+                    { icon: '🧑‍💼', label: 'Vendedores', val: byVendedor.length, cls: 'yellow' },
+                    { icon: '⏱', label: 'Prom. duración', val: avgDur ? fmtDur(avgDur) : '—', cls: 'blue' },
+                ].map(s => (
+                    <div key={s.label} className={`kpi-card ${s.cls}`}>
+                        <div className="kpi-icon">{s.icon}</div>
+                        <div className="kpi-label">{s.label}</div>
+                        <div className="kpi-value">{s.val}</div>
                     </div>
                 ))}
             </div>
 
-            {/* Summary table */}
-            <div className="mt-24">
-                <div className="section-title">📊 Resumen del Equipo</div>
+            {/* Cards por vendedor */}
+            {byVendedor.length > 0 && (
+                <>
+                    <div className="section-title">🧑‍💼 Actividad por Vendedor</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 28 }}>
+                        {byVendedor.map(v => (
+                            <div key={v.name} className="card" style={{ padding: '16px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)', marginBottom: 3 }}>{v.name}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Última: {fmtDate(v.last)}</div>
+                                </div>
+                                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
+                                    <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--blue)', lineHeight: 1 }}>{v.count}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>visitas</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+
+            {/* Tabla de visitas */}
+            <div className="section-title">🗒️ Visitas Recientes</div>
+            <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="🔍 Buscar por cliente o vendedor..."
+                style={{
+                    width: '100%', boxSizing: 'border-box', marginBottom: 12,
+                    background: 'var(--bg-2)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-sm)', padding: '10px 14px',
+                    color: 'var(--text-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit',
+                }}
+            />
+
+            {filtered.length === 0 ? (
+                <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)' }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🕵️</div>
+                    <p>{visits.length === 0 ? 'No hay visitas registradas en tu ciudad todavía.' : `Sin resultados para "${search}"`}</p>
+                </div>
+            ) : (
                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                     <table className="data-table">
                         <thead>
                             <tr>
+                                <th>Fecha</th>
                                 <th>Vendedor</th>
-                                <th>Score</th>
-                                <th>Estado</th>
-                                <th>Visitas</th>
-                                <th>Cierre</th>
-                                <th>VP Rate</th>
-                                <th>Brecha Portafolio</th>
+                                <th>Cliente</th>
+                                <th>Duración</th>
+                                <th>Confianza</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {team.map(v => (
-                                <tr key={v.vendedor_id}>
-                                    <td><strong>{v.nombre}</strong></td>
-                                    <td><span style={{ color: scoreStyle(v.score), fontWeight: 800 }}>{v.score}/100</span></td>
-                                    <td><Semaforo estado={v.semaforo} /></td>
-                                    <td>{v.visitas}</td>
-                                    <td style={{ fontWeight: 600 }}>{Math.round(v.tasa_cierre * 100)}%</td>
-                                    <td style={{ fontWeight: 600 }}>{Math.round(v.vp_rate * 100)}%</td>
-                                    <td style={{ color: v.marcas_brecha.length ? "#dc2626" : "var(--text-3)" }}>
-                                        {v.marcas_brecha.length ? v.marcas_brecha.join(", ") : "✓ Completo"}
-                                    </td>
-                                </tr>
-                            ))}
+                            {filtered.flatMap(v => {
+                                const rows = [
+                                    <tr key={v.id} style={{ cursor: 'pointer' }}
+                                        onClick={() => setExpanded(expanded === v.id ? null : v.id)}>
+                                        <td style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{fmtDate(v.created_at)}</td>
+                                        <td><strong style={{ fontSize: 13 }}>{v.metadata?.vendedor || '—'}</strong></td>
+                                        <td style={{ fontSize: 13 }}>{v.metadata?.cliente || '—'}</td>
+                                        <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{fmtDur(v.duration_seconds)}</td>
+                                        <td><ConfBadge c={v.confidence_score} /></td>
+                                        <td style={{ color: 'var(--text-3)', fontSize: 11 }}>{expanded === v.id ? '▲' : '▼'}</td>
+                                    </tr>
+                                ];
+                                if (expanded === v.id && v.raw_text) {
+                                    rows.push(
+                                        <tr key={`${v.id}-exp`}>
+                                            <td colSpan={6} style={{
+                                                padding: '14px 20px', background: 'var(--bg-2)',
+                                                fontSize: 13, color: 'var(--text-2)',
+                                                lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                                                borderTop: '1px solid var(--border)',
+                                            }}>
+                                                {v.raw_text}
+                                            </td>
+                                        </tr>
+                                    );
+                                }
+                                return rows;
+                            })}
                         </tbody>
                     </table>
                 </div>
-            </div>
+            )}
         </div>
     );
 }

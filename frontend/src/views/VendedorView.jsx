@@ -1,152 +1,163 @@
-import { useState } from 'react';
-import { mockVisitaDemo } from '../data/mockData.js';
-import Semaforo from '../components/Semaforo.jsx';
-import ScoreRing from '../components/ScoreRing.jsx';
+import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../auth.js';
 
-const catStyle = {
-    portafolio: { icon: '📦', bg: '#eff6ff', color: '#1d4ed8' },
-    cierre: { icon: '🤝', bg: '#f0fdf4', color: '#15803d' },
-    relacion_cliente: { icon: '💬', bg: '#fff7ed', color: '#c2410c' },
-    precio: { icon: '💰', bg: '#fefce8', color: '#a16207' },
-    general: { icon: '📋', bg: '#f8fafc', color: '#475569' },
+const CIUDAD = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
+
+const fmtDate = d => {
+    const diff = (Date.now() - new Date(d)) / 1000;
+    if (diff < 3600) return `hace ${Math.round(diff / 60)} min`;
+    if (diff < 86400) return `hace ${Math.round(diff / 3600)} h`;
+    if (diff < 172800) return 'ayer';
+    return new Date(d).toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' });
 };
+const fmtDur = s => s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : null;
 
-export default function VendedorView() {
-    const v = mockVisitaDemo;
-    const [tab, setTab] = useState("resumen");
+function ConfBadge({ c }) {
+    if (c == null) return null;
+    const pct = Math.round(c * 100);
+    const [color, bg] = c >= 0.85 ? ['#16a34a', '#dcfce7'] : c >= 0.65 ? ['#b45309', '#fef3c7'] : ['#dc2626', '#fee2e2'];
+    return (
+        <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>
+            {pct}% conf.
+        </span>
+    );
+}
+
+export default function VendedorView({ currentUser }) {
+    const [visits, setVisits] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [search, setSearch] = useState('');
+    const [expanded, setExpanded] = useState(null);
+
+    useEffect(() => {
+        if (!currentUser) return;
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            fetch('/api/visits', {
+                headers: { Authorization: `Bearer ${session?.access_token}` },
+            })
+                .then(r => r.json())
+                .then(d => {
+                    if (!d.ok) setError(d.error || 'Error al cargar visitas');
+                    else setVisits(d.visits || []);
+                })
+                .catch(e => setError(e.message))
+                .finally(() => setLoading(false));
+        });
+    }, [currentUser?.id]);
+
+    const thisWeek = useMemo(
+        () => visits.filter(v => (Date.now() - new Date(v.created_at)) / 86400000 < 7).length,
+        [visits]
+    );
+
+    const filtered = useMemo(() =>
+        !search
+            ? visits
+            : visits.filter(v =>
+                (v.metadata?.cliente || '').toLowerCase().includes(search.toLowerCase())
+            ),
+        [visits, search]
+    );
+
+    if (loading) return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '40vh', color: 'var(--text-3)', fontSize: 13 }}>
+            Cargando visitas...
+        </div>
+    );
 
     return (
-        <div className="animate-in">
+        <div className="animate-in" style={{ maxWidth: 680, margin: '0 auto' }}>
             <div className="page-header">
-                <div className="flex-between">
-                    <div>
-                        <h2>Mi Último Reporte</h2>
-                        <p>{v.fecha} · {v.cliente} · La Paz</p>
-                    </div>
-                    <Semaforo estado={v.semaforo} />
-                </div>
+                <h2>Mis Visitas</h2>
+                <p>{currentUser?.nombre} · {CIUDAD[currentUser?.ciudad] || currentUser?.ciudad}</p>
             </div>
 
-            {/* Hero */}
-            <div className="card" style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <ScoreRing score={v.score_visita} size={108} />
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
-                            Resumen Ejecutivo · IA
-                        </div>
-                        <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.65 }}>{v.resumen_ejecutivo}</p>
-                        <div style={{ display: 'flex', gap: 6, marginTop: 14, flexWrap: 'wrap' }}>
-                            {v.kpis.cierre_exitoso && <span className="pill pill-green">✅ Cierre exitoso</span>}
-                            {v.kpis.saludo_adecuado && <span className="pill pill-green">👋 Buen saludo</span>}
-                            {v.kpis.quiebre_de_stock_detectado && <span className="pill pill-yellow">📦 Quiebre detectado</span>}
-                            {v.kpis.marcas_faltantes?.length === 0 && <span className="pill pill-green">✅ Portafolio completo</span>}
-                        </div>
-                    </div>
+            {error && (
+                <div style={{ background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--r-sm)', padding: '12px 16px', fontSize: 13, color: 'var(--red)', marginBottom: 16 }}>
+                    ⚠️ {error}
                 </div>
-            </div>
+            )}
 
-            {/* Tabs */}
-            <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
+            {/* Stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
                 {[
-                    { key: "resumen", label: "💡 Coaching" },
-                    { key: "kpis", label: "📊 KPIs" },
-                    { key: "transcripcion", label: "🎙️ Diálogo" },
-                ].map(t => (
-                    <button key={t.key} className={`role-btn ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
-                        {t.label}
-                    </button>
+                    { icon: '📋', label: 'Total', val: visits.length },
+                    { icon: '📅', label: 'Esta semana', val: thisWeek },
+                    { icon: '📍', label: 'Ciudad', val: CIUDAD[currentUser?.ciudad] || '—' },
+                ].map(s => (
+                    <div key={s.label} className="card" style={{ padding: '16px 12px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 22, marginBottom: 4 }}>{s.icon}</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)' }}>{s.val}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>{s.label}</div>
+                    </div>
                 ))}
             </div>
 
-            {/* Coaching */}
-            {tab === "resumen" && (
-                <div className="animate-in">
-                    <div className="section-title">💡 Coaching Insights · Gemini 2.5</div>
-                    {v.coaching_insights.map((ins, i) => {
-                        const s = catStyle[ins.categoria] || catStyle.general;
-                        return (
-                            <div key={i} className="coaching-card">
-                                <div className="coaching-cat-dot" style={{ background: s.bg }}>
-                                    {s.icon}
+            {/* Search */}
+            <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="🔍 Buscar por nombre de cliente..."
+                style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'var(--bg-2)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-sm)', padding: '10px 14px',
+                    color: 'var(--text-1)', fontSize: 13, outline: 'none',
+                    fontFamily: 'inherit', marginBottom: 14,
+                }}
+            />
+
+            {/* List */}
+            {filtered.length === 0 ? (
+                <div className="card" style={{ textAlign: 'center', padding: '52px 24px' }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>🎙️</div>
+                    {visits.length === 0
+                        ? <p style={{ color: 'var(--text-3)', fontSize: 13 }}>No tenés visitas registradas todavía.<br />Grabá tu primera visita con el botón de arriba.</p>
+                        : <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin resultados para "{search}"</p>
+                    }
+                </div>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {filtered.map(v => (
+                        <div
+                            key={v.id}
+                            className="card"
+                            style={{ padding: '15px 18px', cursor: 'pointer', transition: 'border-color 0.15s' }}
+                            onClick={() => setExpanded(expanded === v.id ? null : v.id)}
+                        >
+                            {/* Row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 14, marginBottom: 5 }}>
+                                        {v.metadata?.cliente || 'Cliente sin nombre'}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-3)' }}>
+                                        <span>📅 {fmtDate(v.created_at)}</span>
+                                        {fmtDur(v.duration_seconds) && <span>⏱ {fmtDur(v.duration_seconds)}</span>}
+                                        <span>{v.source === 'microphone' ? '🎙️ Grabación' : '📁 Archivo'}</span>
+                                    </div>
                                 </div>
-                                <div style={{ flex: 1 }}>
-                                    <div className="cat-label">{ins.categoria.replace("_", " ")}</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3, fontStyle: 'italic' }}>
-                                        {ins.observacion}
-                                    </div>
-                                    <div className="insight-text" style={{ marginTop: 6 }}>
-                                        {ins.sugerencia_tactica}
-                                    </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                    <ConfBadge c={v.confidence_score} />
+                                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{expanded === v.id ? '▲' : '▼'}</span>
                                 </div>
                             </div>
-                        );
-                    })}
-                </div>
-            )}
 
-            {/* KPIs */}
-            {tab === "kpis" && (
-                <div className="animate-in">
-                    <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))' }}>
-                        {[
-                            { label: "Score VP", value: `${v.kpis.venta_perfecta_score}/100`, icon: "📊", cls: "yellow" },
-                            { label: "Cierre", value: v.kpis.cierre_exitoso ? "Exitoso" : "No cerrado", icon: "🤝", cls: "green" },
-                            { label: "Técnica", value: v.kpis.tecnica_cierre_usada || "—", icon: "🎯", cls: "blue" },
-                            { label: "Marcas", value: v.kpis.marcas_mencionadas.join(", "), icon: "📦", cls: "green" },
-                            { label: "Faltantes", value: v.kpis.marcas_faltantes.length ? v.kpis.marcas_faltantes.join(", ") : "Ninguna", icon: "⚠️", cls: "green" },
-                            { label: "Quiebre stock", value: v.kpis.quiebre_de_stock_detectado ? "Detectado" : "Sin quiebre", icon: "🏬", cls: "yellow" },
-                            { label: "Precio correcto", value: v.kpis.precio_correcto ? "Correcto" : "Incorrecto", icon: "💰", cls: "green" },
-                            { label: "Saludo", value: v.kpis.saludo_adecuado ? "Adecuado" : "Incorrecto", icon: "👋", cls: "green" },
-                        ].map((k, i) => (
-                            <div key={i} className={`kpi-card ${k.cls}`}>
-                                <div className="kpi-icon">{k.icon}</div>
-                                <div className="kpi-label">{k.label}</div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginTop: 6 }}>{k.value}</div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Transcript */}
-            {tab === "transcripcion" && (
-                <div className="animate-in">
-                    <div className="section-title">🎙️ Transcripción Diarizada · Gemini 2.5 Pro</div>
-                    <div className="card" style={{ padding: 24 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                            {v.segmentos.map((seg, i) => (
-                                <div key={i} style={{ display: 'flex', gap: 10, flexDirection: seg.speaker === "VENDEDOR" ? "row" : "row-reverse" }}>
-                                    <div style={{
-                                        width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
-                                        background: seg.speaker === "VENDEDOR" ? '#eff6ff' : '#f0fdf4',
-                                        border: `1.5px solid ${seg.speaker === "VENDEDOR" ? '#93c5fd' : '#86efac'}`,
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13
-                                    }}>
-                                        {seg.speaker === "VENDEDOR" ? "🧑‍💼" : "🏪"}
-                                    </div>
-                                    <div style={{ flex: 1, maxWidth: '72%' }}>
-                                        <div style={{
-                                            fontSize: 9.5, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
-                                            color: seg.speaker === "VENDEDOR" ? '#2B5EA8' : '#15803d',
-                                            marginBottom: 4, textAlign: seg.speaker === "VENDEDOR" ? "left" : "right"
-                                        }}>
-                                            {seg.speaker}
-                                        </div>
-                                        <div style={{
-                                            background: seg.speaker === "VENDEDOR" ? '#eff6ff' : '#f0fdf4',
-                                            border: `1px solid ${seg.speaker === "VENDEDOR" ? '#bfdbfe' : '#bbf7d0'}`,
-                                            borderRadius: seg.speaker === "VENDEDOR" ? '2px 10px 10px 10px' : '10px 2px 10px 10px',
-                                            padding: '9px 13px',
-                                            fontSize: 13.5, color: 'var(--text-1)', lineHeight: 1.5
-                                        }}>
-                                            {seg.texto}
-                                        </div>
-                                    </div>
+                            {/* Expanded transcript */}
+                            {expanded === v.id && (
+                                <div className="animate-in" style={{
+                                    marginTop: 14, paddingTop: 14,
+                                    borderTop: '1px solid var(--border)',
+                                    fontSize: 13, color: 'var(--text-2)',
+                                    lineHeight: 1.75, whiteSpace: 'pre-wrap',
+                                    maxHeight: 280, overflowY: 'auto',
+                                }}>
+                                    {v.raw_text || <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Sin transcripción</span>}
                                 </div>
-                            ))}
+                            )}
                         </div>
-                    </div>
+                    ))}
                 </div>
             )}
         </div>
