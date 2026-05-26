@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../auth.js';
+import { AnalysisDetail } from '../components/AnalysisCard.jsx';
 
 const CIUDAD_LABEL = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
 
@@ -251,6 +252,13 @@ export default function UploadAudio({ currentUser }) {
                     </div>
                 )}
             </div>
+
+            {transcript?.analysis && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                    <div className="section-title">🧠 Análisis IA</div>
+                    <AnalysisDetail a={transcript.analysis} />
+                </div>
+            )}
 
             {transcript?.raw_text && (
                 <div className="card" style={{ marginBottom: 16 }}>

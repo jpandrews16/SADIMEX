@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../auth.js';
+import { AnalysisPills, AnalysisDetail } from '../components/AnalysisCard.jsx';
 
 const CIUDAD = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
 const CITY_ICONS = { LPZ: '🏔️', CBBA: '🌽', SCZ: '🌴' };
@@ -21,25 +22,52 @@ function ConfBadge({ c }) {
     return <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 7px', borderRadius: 99 }}>{pct}%</span>;
 }
 
+const exportCSV = (rows, filename) => {
+    const headers = ['Fecha', 'Vendedor', 'Cliente', 'Ciudad', 'Duración (min)', 'Confianza %',
+        'Pedido', 'Monto', 'Productos', 'Quiebre Stock', 'Sentimiento', 'Próximo Paso', 'Transcripción'];
+    const data = rows.map(v => {
+        const a = v.metadata?.analysis;
+        return [
+            new Date(v.created_at).toLocaleString('es-BO'),
+            v.metadata?.vendedor || '',
+            v.metadata?.cliente  || '',
+            CIUDAD[v.metadata?.ciudad] || v.metadata?.ciudad || '',
+            v.duration_seconds ? (v.duration_seconds / 60).toFixed(1) : '',
+            v.confidence_score  ? Math.round(v.confidence_score * 100) : '',
+            a ? (a.pedido_capturado ? 'Sí' : 'No') : '',
+            a?.monto_aproximado || '',
+            (a?.productos_mencionados || []).join('; '),
+            (a?.quiebre_stock || []).join('; '),
+            a?.sentimiento_cliente || '',
+            a?.proximo_paso || '',
+            (v.raw_text || '').replace(/[\n\r]+/g, ' '),
+        ];
+    });
+    const csv = [headers, ...data]
+        .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+};
+
 export default function GerenciaView({ currentUser }) {
-    const [visits, setVisits] = useState([]);
+    const [visits, setVisits]   = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [search, setSearch] = useState('');
+    const [error, setError]     = useState('');
+    const [search, setSearch]   = useState('');
     const [cityFilter, setCityFilter] = useState('all');
-    const [expanded, setExpanded] = useState(null);
+    const [expanded, setExpanded]     = useState(null);
 
     useEffect(() => {
         if (!currentUser) return;
         supabase.auth.getSession().then(({ data: { session } }) => {
-            fetch('/api/visits', {
-                headers: { Authorization: `Bearer ${session?.access_token}` },
-            })
+            fetch('/api/visits', { headers: { Authorization: `Bearer ${session?.access_token}` } })
                 .then(r => r.json())
-                .then(d => {
-                    if (!d.ok) setError(d.error || 'Error al cargar');
-                    else setVisits(d.visits || []);
-                })
+                .then(d => { if (!d.ok) setError(d.error || 'Error'); else setVisits(d.visits || []); })
                 .catch(e => setError(e.message))
                 .finally(() => setLoading(false));
         });
@@ -49,6 +77,12 @@ export default function GerenciaView({ currentUser }) {
         () => visits.filter(v => (Date.now() - new Date(v.created_at)) / 86400000 < 7).length,
         [visits]
     );
+    const pedidosPct = useMemo(() => {
+        const withAnalysis = visits.filter(v => v.metadata?.analysis);
+        if (!withAnalysis.length) return null;
+        const captured = withAnalysis.filter(v => v.metadata.analysis.pedido_capturado).length;
+        return Math.round((captured / withAnalysis.length) * 100);
+    }, [visits]);
 
     const byCity = useMemo(() => {
         const map = { LPZ: 0, CBBA: 0, SCZ: 0, NACIONAL: 0 };
@@ -60,18 +94,20 @@ export default function GerenciaView({ currentUser }) {
         const map = {};
         visits.forEach(v => {
             const name = v.metadata?.vendedor || 'Sin nombre';
-            map[name] = (map[name] || 0) + 1;
+            if (!map[name]) map[name] = { count: 0, pedidos: 0 };
+            map[name].count++;
+            if (v.metadata?.analysis?.pedido_capturado) map[name].pedidos++;
         });
-        return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        return Object.entries(map).sort((a, b) => b[1].count - a[1].count).slice(0, 5);
     }, [visits]);
 
     const filtered = useMemo(() =>
         visits.filter(v => {
             const q = search.toLowerCase();
             const matchSearch = !search ||
-                (v.metadata?.cliente || '').toLowerCase().includes(q) ||
+                (v.metadata?.cliente  || '').toLowerCase().includes(q) ||
                 (v.metadata?.vendedor || '').toLowerCase().includes(q) ||
-                (v.raw_text || '').toLowerCase().includes(q);
+                (v.raw_text           || '').toLowerCase().includes(q);
             const matchCity = cityFilter === 'all' || v.metadata?.ciudad === cityFilter;
             return matchSearch && matchCity;
         }),
@@ -90,7 +126,7 @@ export default function GerenciaView({ currentUser }) {
                 <div className="flex-between">
                     <div>
                         <h2>Dashboard Nacional</h2>
-                        <p>{visits.length} visitas registradas · {thisWeek} esta semana</p>
+                        <p>{visits.length} visitas · {thisWeek} esta semana</p>
                     </div>
                     <span className="pill pill-green">● En vivo</span>
                 </div>
@@ -105,10 +141,10 @@ export default function GerenciaView({ currentUser }) {
             {/* KPIs */}
             <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 24 }}>
                 {[
-                    { icon: '📋', label: 'Total visitas', val: visits.length, cls: 'blue' },
-                    { icon: '📅', label: 'Esta semana', val: thisWeek, cls: 'green' },
-                    { icon: '🏔️', label: 'La Paz', val: byCity.LPZ, cls: 'blue' },
-                    { icon: '🌴', label: 'Santa Cruz', val: byCity.SCZ, cls: 'yellow' },
+                    { icon: '📋', label: 'Total visitas',   val: visits.length,                        cls: 'blue'  },
+                    { icon: '📅', label: 'Esta semana',     val: thisWeek,                             cls: 'green' },
+                    { icon: '✅', label: 'Efectividad',     val: pedidosPct != null ? `${pedidosPct}%` : '—', cls: 'green' },
+                    { icon: '🌽', label: 'Cochabamba',      val: byCity.CBBA,                          cls: 'yellow' },
                 ].map(s => (
                     <div key={s.label} className={`kpi-card ${s.cls}`}>
                         <div className="kpi-icon">{s.icon}</div>
@@ -121,19 +157,16 @@ export default function GerenciaView({ currentUser }) {
             {/* Ciudad + Top vendedores */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
 
-                {/* Ciudades */}
                 <div>
                     <div className="section-title">🗺️ Visitas por Ciudad</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {CITIES.map(c => {
                             const count = byCity[c] || 0;
-                            const pct = visits.length > 0 ? Math.round(count / visits.length * 100) : 0;
+                            const pct   = visits.length > 0 ? Math.round(count / visits.length * 100) : 0;
                             return (
                                 <div key={c} className="card" style={{ padding: '14px 16px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                        <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-1)' }}>
-                                            {CITY_ICONS[c]} {CIUDAD[c]}
-                                        </span>
+                                        <span style={{ fontWeight: 700, fontSize: 13 }}>{CITY_ICONS[c]} {CIUDAD[c]}</span>
                                         <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--blue)' }}>{count}</span>
                                     </div>
                                     <div style={{ background: 'var(--bg-3)', borderRadius: 99, height: 5, overflow: 'hidden' }}>
@@ -146,26 +179,26 @@ export default function GerenciaView({ currentUser }) {
                     </div>
                 </div>
 
-                {/* Top vendedores */}
                 <div>
                     <div className="section-title">🏆 Top Vendedores</div>
                     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                         {topVendedores.length === 0 ? (
-                            <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-                                Sin datos aún
-                            </div>
+                            <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Sin datos aún</div>
                         ) : (
                             <table className="data-table">
                                 <tbody>
-                                    {topVendedores.map(([name, count], i) => (
+                                    {topVendedores.map(([name, stats], i) => (
                                         <tr key={name}>
-                                            <td style={{ width: 32, fontWeight: 800, fontSize: 16 }}>
+                                            <td style={{ width: 32, fontWeight: 800, fontSize: 15 }}>
                                                 {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
                                             </td>
                                             <td><strong style={{ fontSize: 13 }}>{name}</strong></td>
+                                            <td style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                                                {stats.pedidos} pedido{stats.pedidos !== 1 ? 's' : ''}
+                                            </td>
                                             <td style={{ textAlign: 'right' }}>
-                                                <span style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 15 }}>{count}</span>
-                                                <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 4 }}>visitas</span>
+                                                <span style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 14 }}>{stats.count}</span>
+                                                <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 3 }}>vis.</span>
                                             </td>
                                         </tr>
                                     ))}
@@ -177,7 +210,23 @@ export default function GerenciaView({ currentUser }) {
             </div>
 
             {/* Buscador + tabla */}
-            <div className="section-title">🔍 Todas las Visitas</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div className="section-title" style={{ margin: 0 }}>🔍 Todas las Visitas</div>
+                <button
+                    onClick={() => exportCSV(filtered, `sadimex_visitas_${new Date().toISOString().slice(0, 10)}.csv`)}
+                    style={{
+                        background: 'var(--bg-2)', border: '1px solid var(--border)',
+                        borderRadius: 'var(--r-sm)', padding: '7px 14px',
+                        fontSize: 12.5, fontWeight: 600, color: 'var(--text-2)',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--blue)'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                >
+                    📥 Exportar Excel ({filtered.length})
+                </button>
+            </div>
+
             <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
                 <input
                     value={search}
@@ -189,16 +238,12 @@ export default function GerenciaView({ currentUser }) {
                         color: 'var(--text-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit',
                     }}
                 />
-                <select
-                    value={cityFilter}
-                    onChange={e => setCityFilter(e.target.value)}
+                <select value={cityFilter} onChange={e => setCityFilter(e.target.value)}
                     style={{
                         background: 'var(--bg-2)', border: '1px solid var(--border)',
                         borderRadius: 'var(--r-sm)', padding: '10px 12px',
-                        color: 'var(--text-1)', fontSize: 13, outline: 'none',
-                        cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                >
+                        color: 'var(--text-1)', fontSize: 13, outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
                     <option value="all">Todas las ciudades</option>
                     {CITIES.map(c => <option key={c} value={c}>{CIUDAD[c]}</option>)}
                 </select>
@@ -207,14 +252,15 @@ export default function GerenciaView({ currentUser }) {
             {filtered.length === 0 ? (
                 <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)' }}>
                     <div style={{ fontSize: 36, marginBottom: 12 }}>🕵️</div>
-                    <p>{visits.length === 0 ? 'Todavía no hay visitas registradas en el sistema.' : 'Sin resultados para esa búsqueda.'}</p>
+                    <p>{visits.length === 0 ? 'Todavía no hay visitas en el sistema.' : 'Sin resultados.'}</p>
                 </div>
             ) : (
                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                    <div style={{ padding: '10px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
-                        {filtered.length} resultado{filtered.length !== 1 ? 's' : ''}
-                        {search && <span> para "<strong style={{ color: 'var(--text-2)' }}>{search}</strong>"</span>}
-                    </div>
+                    {search && (
+                        <div style={{ padding: '9px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
+                            {filtered.length} resultado{filtered.length !== 1 ? 's' : ''} para "<strong style={{ color: 'var(--text-2)' }}>{search}</strong>"
+                        </div>
+                    )}
                     <table className="data-table">
                         <thead>
                             <tr>
@@ -222,13 +268,14 @@ export default function GerenciaView({ currentUser }) {
                                 <th>Vendedor</th>
                                 <th>Cliente</th>
                                 <th>Ciudad</th>
-                                <th>Duración</th>
-                                <th>Confianza</th>
+                                <th>Dur.</th>
+                                <th>Análisis IA</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             {filtered.flatMap(v => {
+                                const a = v.metadata?.analysis;
                                 const rows = [
                                     <tr key={v.id} style={{ cursor: 'pointer' }}
                                         onClick={() => setExpanded(expanded === v.id ? null : v.id)}>
@@ -241,22 +288,26 @@ export default function GerenciaView({ currentUser }) {
                                             </span>
                                         </td>
                                         <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{fmtDur(v.duration_seconds)}</td>
-                                        <td><ConfBadge c={v.confidence_score} /></td>
+                                        <td><AnalysisPills a={a} /></td>
                                         <td style={{ color: 'var(--text-3)', fontSize: 11 }}>{expanded === v.id ? '▲' : '▼'}</td>
                                     </tr>
                                 ];
-                                if (expanded === v.id && v.raw_text) {
+                                if (expanded === v.id) {
                                     rows.push(
                                         <tr key={`${v.id}-exp`}>
-                                            <td colSpan={7} style={{
-                                                padding: '14px 20px',
-                                                background: 'var(--bg-2)',
-                                                fontSize: 13, color: 'var(--text-2)',
-                                                lineHeight: 1.75, whiteSpace: 'pre-wrap',
-                                                borderTop: '1px solid var(--border)',
-                                                maxWidth: 0, // force text wrap in table
-                                            }}>
-                                                {v.raw_text}
+                                            <td colSpan={7} style={{ padding: '16px 20px', background: 'var(--bg-2)', borderTop: '1px solid var(--border)' }}>
+                                                <div style={{ marginBottom: 14 }}>
+                                                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>🧠 Análisis IA</div>
+                                                    <AnalysisDetail a={a} />
+                                                </div>
+                                                {v.raw_text && (
+                                                    <>
+                                                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>🎙️ Transcripción</div>
+                                                        <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: 240, overflowY: 'auto' }}>
+                                                            {v.raw_text}
+                                                        </div>
+                                                    </>
+                                                )}
                                             </td>
                                         </tr>
                                     );

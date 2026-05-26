@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../auth.js';
+import { AnalysisDetail, AnalysisPills } from '../components/AnalysisCard.jsx';
 
 const CIUDAD = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
 
@@ -16,47 +17,43 @@ function ConfBadge({ c }) {
     if (c == null) return null;
     const pct = Math.round(c * 100);
     const [color, bg] = c >= 0.85 ? ['#16a34a', '#dcfce7'] : c >= 0.65 ? ['#b45309', '#fef3c7'] : ['#dc2626', '#fee2e2'];
-    return (
-        <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 99, whiteSpace: 'nowrap' }}>
-            {pct}% conf.
-        </span>
-    );
+    return <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 99 }}>{pct}%</span>;
 }
 
 export default function VendedorView({ currentUser }) {
     const [visits, setVisits] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const [error, setError]   = useState('');
     const [search, setSearch] = useState('');
     const [expanded, setExpanded] = useState(null);
 
     useEffect(() => {
         if (!currentUser) return;
         supabase.auth.getSession().then(({ data: { session } }) => {
-            fetch('/api/visits', {
-                headers: { Authorization: `Bearer ${session?.access_token}` },
-            })
+            fetch('/api/visits', { headers: { Authorization: `Bearer ${session?.access_token}` } })
                 .then(r => r.json())
-                .then(d => {
-                    if (!d.ok) setError(d.error || 'Error al cargar visitas');
-                    else setVisits(d.visits || []);
-                })
+                .then(d => { if (!d.ok) setError(d.error || 'Error'); else setVisits(d.visits || []); })
                 .catch(e => setError(e.message))
                 .finally(() => setLoading(false));
         });
     }, [currentUser?.id]);
 
+    // ── Métricas ──────────────────────────────────────────────────────
+    const todayStr = new Date().toDateString();
+    const todayCount = useMemo(
+        () => visits.filter(v => new Date(v.created_at).toDateString() === todayStr).length,
+        [visits]
+    );
     const thisWeek = useMemo(
         () => visits.filter(v => (Date.now() - new Date(v.created_at)) / 86400000 < 7).length,
         [visits]
     );
+    const meta    = currentUser?.meta_diaria || 15;
+    const metaPct = Math.min(100, Math.round((todayCount / meta) * 100));
 
     const filtered = useMemo(() =>
-        !search
-            ? visits
-            : visits.filter(v =>
-                (v.metadata?.cliente || '').toLowerCase().includes(search.toLowerCase())
-            ),
+        !search ? visits
+            : visits.filter(v => (v.metadata?.cliente || '').toLowerCase().includes(search.toLowerCase())),
         [visits, search]
     );
 
@@ -79,36 +76,56 @@ export default function VendedorView({ currentUser }) {
                 </div>
             )}
 
-            {/* Stats */}
+            {/* ── Meta diaria ── */}
+            <div className="card" style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-1)' }}>🎯 Meta de hoy</span>
+                    <span style={{ fontWeight: 800, fontSize: 15, color: metaPct >= 100 ? '#16a34a' : 'var(--text-1)' }}>
+                        {todayCount} / {meta} visitas
+                    </span>
+                </div>
+                <div style={{ background: 'var(--bg-3)', borderRadius: 99, height: 10, overflow: 'hidden' }}>
+                    <div style={{
+                        height: '100%', borderRadius: 99, transition: 'width 0.5s ease',
+                        background: metaPct >= 100 ? '#16a34a' : 'var(--blue)',
+                        width: `${metaPct}%`,
+                    }} />
+                </div>
+                {metaPct >= 100 && (
+                    <p style={{ margin: '8px 0 0', fontSize: 12.5, fontWeight: 700, color: '#16a34a' }}>
+                        🎉 ¡Meta cumplida! Excelente trabajo.
+                    </p>
+                )}
+            </div>
+
+            {/* ── Stats ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
                 {[
                     { icon: '📋', label: 'Total', val: visits.length },
                     { icon: '📅', label: 'Esta semana', val: thisWeek },
-                    { icon: '📍', label: 'Ciudad', val: CIUDAD[currentUser?.ciudad] || '—' },
+                    { icon: '🏆', label: 'Con pedido', val: visits.filter(v => v.metadata?.analysis?.pedido_capturado).length },
                 ].map(s => (
-                    <div key={s.label} className="card" style={{ padding: '16px 12px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 22, marginBottom: 4 }}>{s.icon}</div>
+                    <div key={s.label} className="card" style={{ padding: '14px 12px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
                         <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-1)' }}>{s.val}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>{s.label}</div>
                     </div>
                 ))}
             </div>
 
-            {/* Search */}
+            {/* ── Búsqueda ── */}
             <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
+                value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="🔍 Buscar por nombre de cliente..."
                 style={{
-                    width: '100%', boxSizing: 'border-box',
+                    width: '100%', boxSizing: 'border-box', marginBottom: 14,
                     background: 'var(--bg-2)', border: '1px solid var(--border)',
                     borderRadius: 'var(--r-sm)', padding: '10px 14px',
-                    color: 'var(--text-1)', fontSize: 13, outline: 'none',
-                    fontFamily: 'inherit', marginBottom: 14,
+                    color: 'var(--text-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit',
                 }}
             />
 
-            {/* List */}
+            {/* ── Lista ── */}
             {filtered.length === 0 ? (
                 <div className="card" style={{ textAlign: 'center', padding: '52px 24px' }}>
                     <div style={{ fontSize: 40, marginBottom: 12 }}>🎙️</div>
@@ -119,45 +136,61 @@ export default function VendedorView({ currentUser }) {
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {filtered.map(v => (
-                        <div
-                            key={v.id}
-                            className="card"
-                            style={{ padding: '15px 18px', cursor: 'pointer', transition: 'border-color 0.15s' }}
-                            onClick={() => setExpanded(expanded === v.id ? null : v.id)}
-                        >
-                            {/* Row */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 14, marginBottom: 5 }}>
-                                        {v.metadata?.cliente || 'Cliente sin nombre'}
-                                    </div>
-                                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-3)' }}>
-                                        <span>📅 {fmtDate(v.created_at)}</span>
-                                        {fmtDur(v.duration_seconds) && <span>⏱ {fmtDur(v.duration_seconds)}</span>}
-                                        <span>{v.source === 'microphone' ? '🎙️ Grabación' : '📁 Archivo'}</span>
-                                    </div>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                                    <ConfBadge c={v.confidence_score} />
-                                    <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{expanded === v.id ? '▲' : '▼'}</span>
-                                </div>
-                            </div>
+                    {filtered.map(v => {
+                        const a = v.metadata?.analysis;
+                        const isOpen = expanded === v.id;
+                        return (
+                            <div key={v.id} className="card" style={{ padding: '15px 18px', cursor: 'pointer' }}
+                                onClick={() => setExpanded(isOpen ? null : v.id)}>
 
-                            {/* Expanded transcript */}
-                            {expanded === v.id && (
-                                <div className="animate-in" style={{
-                                    marginTop: 14, paddingTop: 14,
-                                    borderTop: '1px solid var(--border)',
-                                    fontSize: 13, color: 'var(--text-2)',
-                                    lineHeight: 1.75, whiteSpace: 'pre-wrap',
-                                    maxHeight: 280, overflowY: 'auto',
-                                }}>
-                                    {v.raw_text || <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Sin transcripción</span>}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: 14, marginBottom: 5 }}>
+                                            {v.metadata?.cliente || 'Cliente sin nombre'}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-3)', marginBottom: a ? 8 : 0 }}>
+                                            <span>📅 {fmtDate(v.created_at)}</span>
+                                            {fmtDur(v.duration_seconds) && <span>⏱ {fmtDur(v.duration_seconds)}</span>}
+                                            <span>{v.source === 'microphone' ? '🎙️' : '📁'}</span>
+                                        </div>
+                                        {/* Pills de análisis siempre visibles */}
+                                        {a && <AnalysisPills a={a} />}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                        <ConfBadge c={v.confidence_score} />
+                                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{isOpen ? '▲' : '▼'}</span>
+                                    </div>
                                 </div>
-                            )}
-                        </div>
-                    ))}
+
+                                {/* Expandido: análisis completo + transcripción */}
+                                {isOpen && (
+                                    <div className="animate-in" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                                        <div style={{ marginBottom: 14 }}>
+                                            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
+                                                🧠 Análisis IA
+                                            </div>
+                                            <AnalysisDetail a={a} />
+                                        </div>
+                                        {v.raw_text && (
+                                            <>
+                                                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
+                                                    🎙️ Transcripción
+                                                </div>
+                                                <div style={{
+                                                    fontSize: 13, color: 'var(--text-2)', lineHeight: 1.75,
+                                                    whiteSpace: 'pre-wrap', maxHeight: 260, overflowY: 'auto',
+                                                    background: 'var(--bg-2)', borderRadius: 'var(--r-sm)',
+                                                    padding: '12px 14px', border: '1px solid var(--border)',
+                                                }}>
+                                                    {v.raw_text}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
         </div>
