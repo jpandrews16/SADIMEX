@@ -113,6 +113,9 @@ function ProgressBar() {
     );
 }
 
+// iOS Safari no soporta MediaRecorder — detectamos y mostramos solo file input
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
 export default function UploadAudio({ currentUser }) {
     /* ── form ── */
     const ciudad = currentUser?.ciudad || 'LPZ';
@@ -320,76 +323,80 @@ export default function UploadAudio({ currentUser }) {
                 )}
 
                 {/* Botón grande de grabación */}
-                {recState === 'idle' && (
-                    <button
-                        className="btn btn-primary"
-                        style={{ width: '100%', justifyContent: 'center', fontSize: 15, padding: '16px', gap: 10 }}
-                        onClick={startRecording}
-                    >
-                        🎙️ Iniciar Grabación
-                    </button>
-                )}
-
-                {recState === 'requesting' && (
-                    <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--blue)', fontWeight: 600, fontSize: 14 }}>
-                        Solicitando permiso de micrófono…
-                    </div>
-                )}
-
-                {recState === 'recording' && (
-                    <button
-                        style={{
-                            width: '100%', border: 'none', borderRadius: 'var(--r)',
-                            background: 'var(--blue)', color: '#fff', padding: '16px',
-                            cursor: 'pointer', fontSize: 15, fontWeight: 700,
-                        }}
-                        onClick={stopRecording}
-                    >
-                        <div style={{ marginBottom: 6 }} className="pulse">⏹ Detener — {fmt(recSeconds)}</div>
-                        <Waveform />
-                    </button>
-                )}
-
-                {recState === 'stopped' && (
+                {/* ── iOS: MediaRecorder no disponible → solo file ── */}
+                {isIOS ? (
                     <div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                            <span style={{ fontWeight: 700, color: 'var(--green)', fontSize: 14 }}>
-                                ✅ Grabación lista — {fmt(recSeconds)}
-                            </span>
-                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={resetRec}>
-                                🔄 Repetir
+                        <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: '12px 14px', marginBottom: 12, fontSize: 12.5, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                            📱 En iPhone, grabá con la app <strong>Notas de Voz</strong> y después subí el archivo aquí.
+                        </div>
+                        {!file ? (
+                            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', fontSize: 15, padding: '16px' }}
+                                onClick={() => inputRef.current.click()}>
+                                📁 Seleccionar audio
                             </button>
-                        </div>
-                        <audio controls src={audioURL} style={{ width: '100%', borderRadius: 'var(--r-sm)' }} />
-                    </div>
-                )}
-
-                {/* Separador + subir archivo */}
-                {recState === 'idle' && (
-                    <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
-                            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                            <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>O SUBÍ UN ARCHIVO</span>
-                            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                        </div>
-                        <button
-                            className="btn btn-ghost"
-                            style={{ width: '100%', justifyContent: 'center', fontSize: 13 }}
-                            onClick={() => inputRef.current.click()}
-                        >
-                            📁 Seleccionar MP3 / WAV
-                        </button>
-                        <input ref={inputRef} type="file" accept=".mp3,.wav,.m4a,.ogg,.webm" style={{ display: 'none' }}
+                        ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 600 }}>✅ {file.name}</span>
+                                <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={resetRec}>✕</button>
+                            </div>
+                        )}
+                        <input ref={inputRef} type="file" accept=".mp3,.wav,.m4a,.ogg,.webm,.mp4" style={{ display: 'none' }}
                             onChange={e => { const f = e.target.files[0]; if (f) { setFile(f); setRecState('stopped'); setRecSeconds(0); } }} />
-                    </>
-                )}
-
-                {/* Archivo seleccionado (desde disco) */}
-                {file && !recBlob && recState === 'stopped' && (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-2)' }}>📁 {file.name}</span>
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={resetRec}>✕</button>
                     </div>
+                ) : (
+                    <>
+                        {recState === 'idle' && (
+                            <button className="btn btn-primary"
+                                style={{ width: '100%', justifyContent: 'center', fontSize: 15, padding: '16px', gap: 10 }}
+                                onClick={startRecording}>
+                                🎙️ Iniciar Grabación
+                            </button>
+                        )}
+
+                        {recState === 'requesting' && (
+                            <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--blue)', fontWeight: 600, fontSize: 14 }}>
+                                Solicitando permiso de micrófono…
+                            </div>
+                        )}
+
+                        {recState === 'recording' && (
+                            <button style={{ width: '100%', border: 'none', borderRadius: 'var(--r)', background: 'var(--blue)', color: '#fff', padding: '16px', cursor: 'pointer', fontSize: 15, fontWeight: 700 }}
+                                onClick={stopRecording}>
+                                <div style={{ marginBottom: 6 }} className="pulse">⏹ Detener — {fmt(recSeconds)}</div>
+                                <Waveform />
+                            </button>
+                        )}
+
+                        {recState === 'stopped' && (
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                                    <span style={{ fontWeight: 700, color: 'var(--green)', fontSize: 14 }}>
+                                        ✅ {recBlob ? `Grabación lista — ${fmt(recSeconds)}` : file?.name}
+                                    </span>
+                                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={resetRec}>
+                                        🔄 Repetir
+                                    </button>
+                                </div>
+                                {audioURL && <audio controls src={audioURL} style={{ width: '100%', borderRadius: 'var(--r-sm)' }} />}
+                            </div>
+                        )}
+
+                        {recState === 'idle' && (
+                            <>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '14px 0' }}>
+                                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>O SUBÍ UN ARCHIVO</span>
+                                    <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                                </div>
+                                <button className="btn btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 13 }}
+                                    onClick={() => inputRef.current.click()}>
+                                    📁 Seleccionar MP3 / WAV
+                                </button>
+                                <input ref={inputRef} type="file" accept=".mp3,.wav,.m4a,.ogg,.webm" style={{ display: 'none' }}
+                                    onChange={e => { const f = e.target.files[0]; if (f) { setFile(f); setRecState('stopped'); setRecSeconds(0); } }} />
+                            </>
+                        )}
+                    </>
                 )}
             </div>
 

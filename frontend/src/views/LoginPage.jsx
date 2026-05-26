@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { authenticate } from '../auth.js';
+import { authenticate, resolveEmail, supabase } from '../auth.js';
 
 export default function LoginPage({ onLogin }) {
     const [username, setUsername] = useState('');
@@ -7,6 +7,7 @@ export default function LoginPage({ onLogin }) {
     const [showPass, setShowPass] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [resetSent, setResetSent] = useState(false);
 
     const handleSubmit = async e => {
         e.preventDefault();
@@ -155,6 +156,33 @@ export default function LoginPage({ onLogin }) {
                             </button>
                         </div>
                     </div>
+
+                    {/* Olvidé contraseña */}
+                    <div style={{ textAlign: 'right', marginBottom: 4 }}>
+                        <button type="button"
+                            onClick={async () => {
+                                if (!username.trim()) { setError('Escribí tu usuario primero'); return; }
+                                setLoading(true); setError('');
+                                const email = await resolveEmail(username.trim());
+                                if (!email) { setError('Usuario no encontrado'); setLoading(false); return; }
+                                const { error: e } = await supabase.auth.resetPasswordForEmail(email, {
+                                    redirectTo: window.location.origin,
+                                });
+                                setLoading(false);
+                                if (e) setError(e.message);
+                                else setResetSent(true);
+                            }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: 600, padding: 0, textDecoration: 'underline' }}
+                        >
+                            ¿Olvidaste tu contraseña?
+                        </button>
+                    </div>
+
+                    {resetSent && (
+                        <div style={{ background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.4)', borderRadius: 10, padding: '9px 14px', marginBottom: 14, color: '#86efac', fontSize: 13, fontWeight: 600 }}>
+                            ✅ Revisá tu email — te enviamos un link para resetear la contraseña.
+                        </div>
+                    )}
 
                     {/* Error */}
                     {error && (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../auth.js';
+import { apiFetch } from '../auth.js';
 import { AnalysisPills, AnalysisDetail } from '../components/AnalysisCard.jsx';
 
 const CIUDAD = { LPZ: 'La Paz', CBBA: 'Cochabamba', SCZ: 'Santa Cruz', NACIONAL: 'Nacional' };
@@ -29,13 +29,11 @@ export default function SupervisorView({ currentUser }) {
 
     useEffect(() => {
         if (!currentUser) return;
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            fetch('/api/visits', { headers: { Authorization: `Bearer ${session?.access_token}` } })
-                .then(r => r.json())
-                .then(d => { if (!d.ok) setError(d.error || 'Error'); else setVisits(d.visits || []); })
-                .catch(e => setError(e.message))
-                .finally(() => setLoading(false));
-        });
+        apiFetch('/api/visits')
+            .then(r => r?.json())
+            .then(d => { if (d && !d.ok) setError(d.error || 'Error'); else if (d) setVisits(d.visits || []); })
+            .catch(e => setError(e.message))
+            .finally(() => setLoading(false));
     }, [currentUser?.id]);
 
     const thisWeek = useMemo(

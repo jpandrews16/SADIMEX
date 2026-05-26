@@ -60,3 +60,36 @@ export async function authenticate(loginKey, password) {
 export async function logout() {
     await supabase.auth.signOut();
 }
+
+/** Wrapper de fetch que adjunta el token automáticamente y maneja 401 → logout */
+export async function apiFetch(url, options = {}) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+        await supabase.auth.signOut(); // dispara SIGNED_OUT → App.jsx redirige al login
+        return null;
+    }
+    const res = await fetch(url, {
+        ...options,
+        headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            ...(options.headers || {}),
+        },
+    });
+    if (res.status === 401) {
+        await supabase.auth.signOut();
+        return null;
+    }
+    return res;
+}
+
+/** Resuelve username → email (para recuperar contraseña) */
+export async function resolveEmail(loginKey) {
+    const key = loginKey.trim();
+    if (key.includes('@')) return key;
+    const { data } = await supabase
+        .from('sadimex_profiles')
+        .select('email')
+        .eq('username', key)
+        .limit(1);
+    return data?.[0]?.email ?? null;
+}
