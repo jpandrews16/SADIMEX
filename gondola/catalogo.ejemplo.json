@@ -1,0 +1,176 @@
+{
+  "_nota": "Catálogo de arranque para desarrollo y tests. En producción esto vive en las tablas gondola_skus / gondola_reglas / gondola_precios. Reemplaza los SKU y precios por los reales antes de usarlo en sala.",
+
+  "skus": [
+    {
+      "id": "11111111-1111-1111-1111-111111111101",
+      "codigo": "NOEL-FESTIVAL-200",
+      "nombre": "Galletas Festival 200g",
+      "marca": "Noel",
+      "categoria": "galletas",
+      "gramaje": "200g",
+      "es_prioritario": true,
+      "packshot_url": null,
+      "descripcion_visual": "Empaque rojo con letras blancas grandes 'FESTIVAL'. Formato rectangular horizontal.",
+      "activo": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111102",
+      "codigo": "NOEL-SALTIN-250",
+      "nombre": "Galletas Saltín 250g",
+      "marca": "Noel",
+      "categoria": "galletas",
+      "gramaje": "250g",
+      "es_prioritario": true,
+      "packshot_url": null,
+      "descripcion_visual": "Empaque azul y blanco, letras rojas 'SALTÍN'. Paquete alargado vertical.",
+      "activo": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111103",
+      "codigo": "NOEL-DUCALES-300",
+      "nombre": "Galletas Ducales 300g",
+      "marca": "Noel",
+      "categoria": "galletas",
+      "gramaje": "300g",
+      "es_prioritario": false,
+      "packshot_url": null,
+      "descripcion_visual": "Empaque verde oscuro con dorado, letras 'DUCALES'.",
+      "activo": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111201",
+      "codigo": "WILD-CHOCOLATE",
+      "nombre": "Wild Protein Chocolate",
+      "marca": "Wild Protein",
+      "categoria": "suplementos",
+      "gramaje": "500g",
+      "es_prioritario": true,
+      "packshot_url": null,
+      "descripcion_visual": "Pote negro con BANDA CAFÉ y la palabra CHOCOLATE. La banda de color es lo único que lo distingue de sus variantes.",
+      "activo": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111202",
+      "codigo": "WILD-VAINILLA",
+      "nombre": "Wild Protein Vainilla",
+      "marca": "Wild Protein",
+      "categoria": "suplementos",
+      "gramaje": "500g",
+      "es_prioritario": true,
+      "packshot_url": null,
+      "descripcion_visual": "Pote negro con BANDA AMARILLA CLARA y la palabra VAINILLA.",
+      "activo": true
+    },
+    {
+      "id": "11111111-1111-1111-1111-111111111203",
+      "codigo": "WILD-FRESA",
+      "nombre": "Wild Protein Fresa",
+      "marca": "Wild Protein",
+      "categoria": "suplementos",
+      "gramaje": "500g",
+      "es_prioritario": false,
+      "packshot_url": null,
+      "descripcion_visual": "Pote negro con BANDA ROSADA y la palabra FRESA.",
+      "activo": true
+    }
+  ],
+
+  "reglas": [
+    {
+      "nombre": "Base galletas — presencia y etiqueta",
+      "cadena_id": null,
+      "sku_id": null,
+      "marca": null,
+      "categoria": "galletas",
+      "exige_presencia": true,
+      "nivel_objetivo": "cualquiera",
+      "frentes_minimos": 2,
+      "share_minimo_pct": null,
+      "exige_bloque": true,
+      "exige_etiqueta": true,
+      "exige_sin_quiebre": true,
+      "activo": true
+    },
+    {
+      "nombre": "Noel prioritaria — altura de ojos y 15% de share",
+      "cadena_id": null,
+      "sku_id": null,
+      "marca": "Noel",
+      "categoria": null,
+      "exige_presencia": true,
+      "nivel_objetivo": "ojos_o_manos",
+      "frentes_minimos": 3,
+      "share_minimo_pct": 15.0,
+      "exige_bloque": true,
+      "exige_etiqueta": true,
+      "exige_sin_quiebre": true,
+      "activo": true
+    },
+    {
+      "nombre": "Wild Protein — altura de ojos",
+      "cadena_id": null,
+      "sku_id": null,
+      "marca": "Wild Protein",
+      "categoria": null,
+      "exige_presencia": true,
+      "nivel_objetivo": "ojos",
+      "frentes_minimos": 2,
+      "share_minimo_pct": null,
+      "exige_bloque": true,
+      "exige_etiqueta": true,
+      "exige_sin_quiebre": true,
+      "activo": true
+    },
+    {
+      "nombre": "Ducales — sin exigencia de altura",
+      "cadena_id": null,
+      "sku_id": "11111111-1111-1111-1111-111111111103",
+      "marca": null,
+      "categoria": null,
+      "exige_presencia": false,
+      "nivel_objetivo": "cualquiera",
+      "frentes_minimos": 1,
+      "share_minimo_pct": null,
+      "exige_bloque": false,
+      "exige_etiqueta": true,
+      "exige_sin_quiebre": true,
+      "activo": true
+    }
+  ],
+
+  "precios": [
+    {
+      "sku_id": "11111111-1111-1111-1111-111111111101",
+      "cadena_id": null,
+      "pvp": 12.5,
+      "moneda": "BOB",
+      "tolerancia_pct": 3.0,
+      "vigente_hasta": null
+    },
+    {
+      "sku_id": "11111111-1111-1111-1111-111111111102",
+      "cadena_id": null,
+      "pvp": 15.0,
+      "moneda": "BOB",
+      "tolerancia_pct": 3.0,
+      "vigente_hasta": null
+    },
+    {
+      "sku_id": "11111111-1111-1111-1111-111111111201",
+      "cadena_id": null,
+      "pvp": 210.0,
+      "moneda": "BOB",
+      "tolerancia_pct": 5.0,
+      "vigente_hasta": null
+    },
+    {
+      "sku_id": "11111111-1111-1111-1111-111111111202",
+      "cadena_id": null,
+      "pvp": 210.0,
+      "moneda": "BOB",
+      "tolerancia_pct": 5.0,
+      "vigente_hasta": null
+    }
+  ]
+}

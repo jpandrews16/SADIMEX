@@ -45,3 +45,10 @@ supabase/.temp/
 
 # === Build scripts (temp) ===
 frontend/create_admin.mjs
+
+# === Pytest ===
+.pytest_cache/
+
+# === Comparacion de modelos (salida local) ===
+comparacion_modelos.json
+fotos_anotadas/
