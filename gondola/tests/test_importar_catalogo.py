@@ -10,7 +10,12 @@ import io
 
 from PIL import Image
 
-from gondola.tools.importar_catalogo_canva import _slug, recortar_fondo, sugerir_codigo
+from gondola.tools.importar_catalogo_canva import (
+    _slug,
+    parece_vacia,
+    recortar_fondo,
+    sugerir_codigo,
+)
 
 
 # =====================================================================
@@ -100,6 +105,31 @@ def test_funciona_con_fondo_no_blanco():
     recortada = recortar_fondo(img)
 
     assert recortada.width < 400
+
+
+# =====================================================================
+# Páginas en blanco
+# =====================================================================
+
+
+def test_pagina_en_blanco_se_detecta():
+    """Un diseño de Canva trae separadores y huecos: no son productos."""
+    assert parece_vacia(Image.new("RGB", (800, 800), (255, 255, 255))) is True
+
+
+def test_pagina_de_un_color_cualquiera_tambien_esta_vacia():
+    assert parece_vacia(Image.new("RGB", (800, 800), (12, 40, 90))) is True
+
+
+def test_pagina_con_producto_no_esta_vacia():
+    img = _con_recuadro((255, 255, 255), (200, 30, 30), (150, 150, 250, 250))
+    assert parece_vacia(img) is False
+
+
+def test_una_marca_muy_tenue_no_cuenta_como_producto():
+    """Un degradado casi imperceptible de Canva no debe pasar por envase."""
+    img = _con_recuadro((255, 255, 255), (253, 253, 253), (150, 150, 250, 250))
+    assert parece_vacia(img) is True
 
 
 def test_conserva_el_formato_al_guardar():

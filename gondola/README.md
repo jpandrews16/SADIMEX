@@ -118,7 +118,7 @@ gondola/
 ├── tools/
 │   ├── comparar_modelos.py     Compara modelos sobre TUS fotos con métricas reales
 │   └── importar_catalogo_canva.py  PDF de Canva → packshots + catálogo CSV
-├── tests/                  105 tests: reglas, evidencia, costos, CSV, saneamiento
+├── tests/                  109 tests: reglas, evidencia, costos, CSV, saneamiento
 ├── catalogo.ejemplo.json   Catálogo de arranque
 ├── Dockerfile
 ├── railway.json            Servicio API
@@ -146,12 +146,22 @@ foto directo ahí, igual que hoy hace con los audios.
 ### 3. Catálogo — desde Canva, en un paso
 
 El diseño de producto ya vive en Canva, una página por SKU. No hay que
-transcribirlo a mano:
+transcribirlo a mano.
+
+**El script corre en tu máquina, no en un servidor.** El PDF puede pesar
+cientos de MB y nunca se sube a ningún lado: se procesa local y solo
+viajan los packshots ya reducidos, a tu propio Storage.
 
 ```bash
 # Canva → Archivo → Descargar → PDF estándar → todas las páginas
 pip install -r gondola/requirements-tools.txt
+export OPENROUTER_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...
 
+# Probar con 5 páginas antes de gastar en todas
+python -m gondola.tools.importar_catalogo_canva \
+    --pdf ~/Descargas/PRODUCTOS_SDX.pdf --salida ./packshots --limite 5
+
+# Si se ve bien, correr todo
 python -m gondola.tools.importar_catalogo_canva \
     --pdf ~/Descargas/PRODUCTOS_SDX.pdf \
     --salida ./packshots \
@@ -159,11 +169,21 @@ python -m gondola.tools.importar_catalogo_canva \
     --subir
 ```
 
-Esto corta el PDF en un PNG por producto, recorta el fondo blanco de
-Canva, sube cada packshot al Storage, y le pide al modelo barato que lea
-cada envase para armar un **CSV borrador** con marca, nombre, gramaje y
-`descripcion_visual`. La columna `revisar` marca las filas donde la IA no
-estuvo segura.
+Esto corta el PDF en un PNG por producto, descarta las páginas en blanco
+del diseño, recorta el fondo de Canva, sube cada packshot al Storage, y le
+pide al modelo barato que lea cada envase para armar un **CSV borrador**
+con marca, nombre, gramaje y `descripcion_visual`. La columna `revisar`
+marca las filas donde la IA no estuvo segura.
+
+**Es reanudable y nada se paga dos veces.** Los PNG extraídos y las
+descripciones ya pagadas quedan en la carpeta de salida y se reutilizan.
+Si se corta la conexión o cancelas con Ctrl-C, vuelve a correr el mismo
+comando y sigue donde quedó. Para trabajar por tandas: `--desde 1 --hasta
+100`, luego `--desde 101`; el CSV final se arma siempre con todos los
+packshots de la carpeta, no solo con el último lote.
+
+`--solo-extraer` corta el PDF en imágenes sin llamar a la IA, por si
+quieres revisar el recorte antes de gastar.
 
 Revisa el CSV —sobre todo la columna `codigo`, que debe quedar con el
 código real de tu ERP— y cárgalo:
@@ -399,7 +419,7 @@ Vistas SQL creadas por las migraciones:
 python -m pytest gondola/tests -q
 ```
 
-105 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
+109 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
 los casos que protegen al reponedor: sin PVP cargado no se penaliza, sin
 mueble completo no se evalúa la altura), la jerarquía de resolución de
 reglas y precios, el saneamiento de la respuesta del modelo, la validación
