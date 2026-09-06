@@ -24,13 +24,22 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Modelo primario: barato, se usa en el 100% de las fotos.
-    modelo_primario: str = "google/gemini-2.5-flash-lite"
+    # Qwen3-VL 32B es el más barato con visión de detalle decente en
+    # OpenRouter. Valídalo contra tus propias fotos con
+    # `tools/comparar_modelos.py` antes de dejarlo fijo.
+    modelo_primario: str = "qwen/qwen3-vl-32b-instruct"
     # Modelo de escalado: solo cuando el primario reporta baja confianza.
-    modelo_escalado: str = "google/gemini-2.5-flash"
+    modelo_escalado: str = "qwen/qwen3-vl-235b-a22b-instruct"
     # Por debajo de esta confianza global se reintenta con el modelo de escalado.
+    # Con volumen alto este número es la perilla del gasto: subirlo escala
+    # más fotos y cuesta más; bajarlo abarata y deja pasar más error.
     umbral_escalado: float = 0.75
     # Detecciones por debajo de esta confianza no cuentan como producto presente.
     umbral_deteccion: float = 0.60
+    # Tope de fotos que pueden escalar al modelo grande, como fracción del
+    # total del día. Protege la factura cuando entra un lote de fotos malas.
+    # 0 desactiva el escalado; 1.0 lo deja sin tope.
+    escalado_max_fraccion_diaria: float = 0.20
 
     # Identificación de la app ante OpenRouter (aparece en su dashboard).
     app_url: str = "https://sadimex.com"
@@ -54,6 +63,11 @@ class Settings(BaseSettings):
     # reconocer el envase, no leer la letra pequeña.
     packshot_lado: int = 220
     packshot_columnas: int = 5
+    # Tope de packshots en la hoja de referencia. Con catálogos grandes el
+    # mosaico se vuelve el costo dominante de cada foto: son tokens de
+    # imagen que se pagan en TODAS las llamadas. Se priorizan los SKU
+    # marcados como prioritarios y se corta el resto.
+    packshot_max_en_hoja: int = 24
 
     # ── Operación ────────────────────────────────────────────────────
     log_level: str = "INFO"

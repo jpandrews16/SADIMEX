@@ -64,6 +64,30 @@ def _descargar(client: httpx.Client, url: str, lado: int) -> Optional[Image.Imag
         return None
 
 
+def seleccionar_para_hoja(skus: Sequence[Sku], tope: int) -> list[Sku]:
+    """Elige qué packshots entran al mosaico cuando el catálogo es grande.
+
+    El mosaico viaja en CADA llamada, así que sus tokens de imagen se pagan
+    en todas las fotos. Con catálogos de cientos de SKU hay que cortar:
+    primero los prioritarios, después el resto, y siempre en orden estable
+    para que la caché del mosaico no se invalide entre fotos.
+    """
+    con_foto = [s for s in skus if s.packshot_url]
+    if len(con_foto) <= tope:
+        return sorted(con_foto, key=lambda s: s.codigo)
+
+    prioritarios = sorted((s for s in con_foto if s.es_prioritario), key=lambda s: s.codigo)
+    resto = sorted((s for s in con_foto if not s.es_prioritario), key=lambda s: s.codigo)
+    seleccion = (prioritarios + resto)[:tope]
+
+    log.warning(
+        "Catálogo con %d packshots supera el tope de %d para la hoja de referencia; "
+        "%d SKU quedan sin imagen de apoyo. Considera dividir la categoría.",
+        len(con_foto), tope, len(con_foto) - tope,
+    )
+    return sorted(seleccion, key=lambda s: s.codigo)
+
+
 def construir_hoja_referencia(skus: Sequence[Sku]) -> Optional[str]:
     """Devuelve el mosaico como data URL JPEG, o None si no hay packshots.
 
@@ -72,7 +96,7 @@ def construir_hoja_referencia(skus: Sequence[Sku]) -> Optional[str]:
     precisión en variantes parecidas.
     """
     cfg = get_settings()
-    con_foto = [s for s in skus if s.packshot_url]
+    con_foto = seleccionar_para_hoja(skus, cfg.packshot_max_en_hoja)
     if not con_foto:
         return None
 

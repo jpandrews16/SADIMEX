@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional, Sequence
 
 import httpx
@@ -29,6 +30,57 @@ log = logging.getLogger(__name__)
 
 class VisionError(RuntimeError):
     """El modelo no devolvió una observación utilizable."""
+
+
+class CuotaEscalado:
+    """Tope diario de escalados al modelo grande.
+
+    Con volumen alto, un lote de fotos malas (una sala con contraluz, un
+    reponedor nuevo con mal pulso) puede mandar todo al modelo caro y
+    multiplicar la factura del día sin que nadie se entere. Este contador
+    corta el escalado cuando pasa de la fracción configurada.
+
+    Vive en memoria del proceso: con varias réplicas del worker cada una
+    lleva su propia cuota, lo que reparte el tope de forma proporcional.
+    No necesita ser exacto, necesita evitar la sorpresa a fin de mes.
+    """
+
+    def __init__(self) -> None:
+        self._dia: Optional[str] = None
+        self._total = 0
+        self._escalados = 0
+
+    def _rotar(self) -> None:
+        hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if hoy != self._dia:
+            self._dia, self._total, self._escalados = hoy, 0, 0
+
+    def registrar_foto(self) -> None:
+        self._rotar()
+        self._total += 1
+
+    def permite_escalar(self, fraccion_max: float) -> bool:
+        self._rotar()
+        if fraccion_max >= 1.0:
+            return True
+        if fraccion_max <= 0:
+            return False
+        # Las primeras fotos del día siempre pueden escalar: sin esto,
+        # con el total en 1 ninguna pasaría nunca el umbral.
+        if self._escalados == 0:
+            return True
+        return self._escalados < self._total * fraccion_max
+
+    def registrar_escalado(self) -> None:
+        self._rotar()
+        self._escalados += 1
+
+    def estado(self) -> dict:
+        self._rotar()
+        return {"dia": self._dia, "fotos": self._total, "escalados": self._escalados}
+
+
+cuota_escalado = CuotaEscalado()
 
 
 def _headers() -> dict[str, str]:
@@ -152,6 +204,7 @@ def analizar_foto(
     propio = client is None
     client = client or httpx.Client()
     try:
+        cuota_escalado.registrar_foto()
         bruto, uso, duracion = _llamar_modelo(client, cfg.modelo_primario, mensajes)
         obs = _normalizar(bruto, codigos)
         modelo_usado, escalado = cfg.modelo_primario, False
@@ -162,7 +215,16 @@ def analizar_foto(
         necesita_escalar = (
             obs.confianza_global < cfg.umbral_escalado or obs.calidad_foto == "mala"
         )
+        if necesita_escalar and not cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria):
+            log.warning(
+                "Foto con confianza %.2f pero la cuota diaria de escalado está agotada (%s); "
+                "se conserva la lectura del modelo barato.",
+                obs.confianza_global, cuota_escalado.estado(),
+            )
+            necesita_escalar = False
+
         if necesita_escalar and cfg.modelo_escalado != cfg.modelo_primario:
+            cuota_escalado.registrar_escalado()
             log.info(
                 "Escalando a %s (confianza %.2f, calidad %s)",
                 cfg.modelo_escalado, obs.confianza_global, obs.calidad_foto,

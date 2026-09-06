@@ -1,0 +1,6 @@
+# Dependencias solo de las herramientas de gondola/tools/.
+# No hacen falta en el servicio ni en el worker desplegados en Railway.
+-r requirements.txt
+
+# Lectura del PDF de packshots exportado desde Canva.
+PyMuPDF>=1.24.0

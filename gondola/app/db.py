@@ -56,6 +56,17 @@ def traer_pesos() -> dict[str, float]:
     return {f["regla"]: float(f["peso"]) for f in filas}
 
 
+def traer_perfil(user_id: str) -> Optional[dict]:
+    filas = (
+        cliente().table("sadimex_profiles").select("*").eq("id", user_id).limit(1).execute().data
+    )
+    return filas[0] if filas else None
+
+
+def traer_cadenas() -> list[dict]:
+    return cliente().table("cadenas").select("*").eq("activo", True).order("nombre").execute().data or []
+
+
 def traer_sala(sala_id: str) -> Optional[dict]:
     filas = (
         cliente()
@@ -155,3 +166,49 @@ def guardar_analisis(analisis: Analisis, etiquetas_detalle: list[dict]) -> dict:
 def traer_analisis(photo_id: str) -> Optional[dict]:
     filas = cliente().table("gondola_analyses").select("*").eq("photo_id", photo_id).limit(1).execute().data
     return filas[0] if filas else None
+
+
+# =====================================================================
+# Administración de catálogo y precios
+# =====================================================================
+
+
+def cargar_precio(
+    sku_codigo: str,
+    cadena_nombre: Optional[str],
+    pvp: float,
+    moneda: str = "BOB",
+    tolerancia_pct: float = 3.0,
+) -> dict:
+    """Carga un precio cerrando el anterior. Devuelve {accion, detalle}.
+
+    La lógica vive en el RPC `gondola_cargar_precio` para que el cierre del
+    precio viejo y la inserción del nuevo ocurran en una sola transacción.
+    """
+    filas = cliente().rpc(
+        "gondola_cargar_precio",
+        {
+            "p_sku_codigo": sku_codigo,
+            "p_cadena_nombre": cadena_nombre,
+            "p_pvp": pvp,
+            "p_moneda": moneda,
+            "p_tolerancia": tolerancia_pct,
+        },
+    ).execute().data
+    if not filas:
+        return {"accion": "error", "detalle": "el RPC no devolvió resultado"}
+    return filas[0] if isinstance(filas, list) else filas
+
+
+def upsert_skus(filas: list[dict]) -> list[dict]:
+    """Alta o actualización masiva de SKU, por código."""
+    if not filas:
+        return []
+    return cliente().table("gondola_skus").upsert(filas, on_conflict="codigo").execute().data or []
+
+
+def traer_vista(nombre: str, filtros: Optional[dict] = None, limite: int = 1000) -> list[dict]:
+    q = cliente().table(nombre).select("*")
+    for columna, valor in (filtros or {}).items():
+        q = q.eq(columna, valor)
+    return q.limit(limite).execute().data or []
