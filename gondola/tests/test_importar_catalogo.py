@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from PIL import Image
 
 from gondola.tools.importar_catalogo_canva import (
     _slug,
+    gramaje_plausible,
     parece_vacia,
     recortar_fondo,
     sugerir_codigo,
@@ -137,3 +139,22 @@ def test_conserva_el_formato_al_guardar():
     buffer = io.BytesIO()
     img.convert("RGB").save(buffer, format="PNG")
     assert Image.open(io.BytesIO(buffer.getvalue())).mode == "RGB"
+
+
+# =====================================================================
+# Gramaje
+# =====================================================================
+
+
+@pytest.mark.parametrize("valor", ["200 g", "108g", "1.5 L", "500 ml", "12 oz", "6 un"])
+def test_gramaje_valido_pasa(valor):
+    assert gramaje_plausible(valor) is True
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["../../../50", "50", "consultar", "", "g", "<script>200g</script>", "x" * 30],
+)
+def test_gramaje_raro_se_rechaza(valor):
+    """El modelo a veces devuelve basura y no puede llegar al catálogo."""
+    assert gramaje_plausible(valor) is False

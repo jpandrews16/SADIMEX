@@ -353,6 +353,25 @@ def describir(ruta: Path, modelo: str, client: httpx.Client) -> dict:
 # =====================================================================
 
 
+UNIDADES = ("g", "kg", "ml", "l", "cc", "oz", "un", "lb")
+
+
+def gramaje_plausible(texto: str) -> bool:
+    """Un contenido neto real: un número y una unidad, nada más.
+
+    Rechaza lo que el modelo inventa cuando no lee bien el envase, que si
+    no se cuela tal cual al catálogo.
+    """
+    limpio = str(texto).strip().lower()
+    if not limpio or len(limpio) > 20:
+        return False
+    if not re.search(r"\d", limpio):
+        return False
+    if re.search(r"[/\\<>{}|]", limpio):
+        return False
+    return any(re.search(rf"\d\s*{u}\b", limpio) for u in UNIDADES)
+
+
 def _slug(texto: str, largo: int = 12) -> str:
     sin_tildes = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
     limpio = re.sub(r"[^A-Za-z0-9]+", "", sin_tildes).upper()
@@ -577,6 +596,10 @@ def main() -> int:
             motivos.append("falta marca")
         if not datos.get("gramaje"):
             motivos.append("falta gramaje")
+        elif not gramaje_plausible(datos["gramaje"]):
+            # El modelo a veces devuelve basura acá ("../../../50"). Es un
+            # dato que se copia al catálogo, así que mejor marcarlo.
+            motivos.append(f"gramaje raro: {datos['gramaje']}")
         if datos.get("legible") is False:
             motivos.append("envase poco legible")
 
