@@ -50,17 +50,37 @@ SHARD = (
     "resolve/main/data/train-00000-of-00235.parquet"
 )
 
-# El prompt pide SKU de un catálogo, pero acá no hay catálogo: SKU-110K no
-# dice qué producto es cada caja. Se usa un catálogo mínimo para que el
-# prompt siga siendo el de producción, y se lee solo el campo que sí tiene
-# verdad de referencia.
-CATALOGO_MINIMO = [
+# El catálogo tiene que ser el de producción: SKU reales y acotados.
+#
+# El primer intento usó un SKU genérico ("cualquier producto envasado") y
+# eso rompió la medición: el modelo trató de enumerar los 42-260 productos
+# de la foto uno por uno, la salida se pasó del tope de tokens y el JSON
+# llegó cortado en 7 de 8 fotos. En producción nunca pasa eso —el catálogo
+# son estos SKU y solo estos se enumeran en `detecciones`; todo lo demás
+# (la competencia, que en una góndola es casi todo) va como un número en
+# `frentes_totales_lineal`.
+#
+# Estas son marcas bolivianas/colombianas que no aparecen en SKU-110K
+# (fotos de supermercados de EEUU e Israel), así que `detecciones` sale
+# vacía —lo correcto— y el conteo total queda como único campo a medir.
+CATALOGO_EVAL = [
     Sku(
-        id="eval", codigo="EVAL-GENERICO", nombre="Producto de referencia",
-        marca="Referencia", categoria="general",
-        descripcion_visual="Cualquier producto envasado de supermercado.",
-    )
+        id="eval-1", codigo="COLCAFE-MOCCA-108G", nombre="Cappuccino Mocca",
+        marca="Colcafé", categoria="cafe", gramaje="108 g",
+        descripcion_visual="Caja roja de cappuccino instantáneo.",
+    ),
+    Sku(
+        id="eval-2", codigo="COLCAFE-VAINILLA-108G", nombre="Cappuccino Vainilla",
+        marca="Colcafé", categoria="cafe", gramaje="108 g",
+        descripcion_visual="Caja azul de cappuccino instantáneo.",
+    ),
+    Sku(
+        id="eval-3", codigo="NOEL-FESTIVAL-200G", nombre="Festival",
+        marca="Noel", categoria="galletas", gramaje="200 g",
+        descripcion_visual="Paquete rojo de galletas rellenas.",
+    ),
 ]
+CODIGOS_EVAL = {s.codigo for s in CATALOGO_EVAL}
 
 
 def cargar_muestra(limite: int, max_productos: int, ruta_local: str | None):
@@ -117,16 +137,16 @@ def main() -> int:
     import httpx
 
     print(f"\nModelo: {cfg.modelo_primario}")
-    print(f"{'imagen':<16} {'real':>6} {'contado':>8} {'error':>8} {'error %':>8} {'ms':>7}")
-    print("-" * 60)
+    print(f"{'imagen':<16} {'real':>6} {'contado':>8} {'error':>8} {'error %':>8} {'ms':>7} {'det':>4}")
+    print("-" * 66)
 
     filas = []
     with httpx.Client() as client:
         for image_id, datos, real in muestra:
-            mensajes = construir_mensajes(CATALOGO_MINIMO, preparar_foto_gondola(datos))
+            mensajes = construir_mensajes(CATALOGO_EVAL, preparar_foto_gondola(datos))
             try:
                 bruto, uso, ms = _llamar_con_reintento(client, cfg.modelo_primario, mensajes)
-                obs = _normalizar(bruto, {"EVAL-GENERICO"})
+                obs = _normalizar(bruto, CODIGOS_EVAL)
             except (VisionError, httpx.HTTPError) as exc:
                 print(f"{image_id:<16} {real:>6} {'FALLO':>8}  {str(exc)[:30]}")
                 filas.append({"image_id": image_id, "real": real, "contado": None})
@@ -135,11 +155,18 @@ def main() -> int:
             contado = obs.frentes_totales_lineal
             error = contado - real
             error_pct = 100 * error / real if real else 0
-            print(f"{image_id:<16} {real:>6} {contado:>8} {error:>+8} {error_pct:>+7.0f}% {ms:>7}")
+            print(
+                f"{image_id:<16} {real:>6} {contado:>8} {error:>+8} "
+                f"{error_pct:>+7.0f}% {ms:>7} {len(obs.detecciones):>4}"
+            )
             filas.append({
                 "image_id": image_id, "real": real, "contado": contado,
                 "error": error, "error_pct": round(error_pct, 1),
                 "confianza": obs.confianza_global, "ms": ms,
+                # Debería ser 0: el catálogo son marcas que no existen en
+                # estas fotos. Si sale >0, el modelo está inventando SKU.
+                "detecciones": len(obs.detecciones),
+                "tokens_salida": (uso.get("completion_tokens") or 0),
                 "costo_usd": float(uso.get("cost") or 0.0),
             })
 
@@ -151,12 +178,14 @@ def main() -> int:
     errores = [f["error"] for f in validas]
     errores_pct = [abs(f["error_pct"]) for f in validas]
 
-    print("-" * 60)
+    print("-" * 66)
     print(f"\n{'RESULTADO':<28} {len(validas)}/{len(filas)} imágenes analizadas")
     print(f"{'error absoluto medio':<28} {statistics.mean(abs(e) for e in errores):.1f} productos")
     print(f"{'error relativo medio':<28} {statistics.mean(errores_pct):.0f}%")
     print(f"{'sesgo (+ sobrecuenta)':<28} {statistics.mean(errores):+.1f} productos")
     print(f"{'costo total':<28} {sum(f['costo_usd'] for f in validas):.4f} USD")
+    inventadas = sum(f["detecciones"] for f in validas)
+    print(f"{'SKU propios inventados':<28} {inventadas} (debería ser 0)")
 
     # Lo que de verdad importa para el negocio: cuánto se desvía el share
     # of shelf si el denominador está mal contado.

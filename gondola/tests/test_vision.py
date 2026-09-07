@@ -458,3 +458,57 @@ def test_una_respuesta_truncada_se_reintenta_en_vez_de_matar_la_foto(skus_min, m
 
     assert intentos["n"] == 2
     assert obs.confianza_global == 0.95
+
+
+def test_corte_por_tope_de_tokens_no_se_reintenta(monkeypatch):
+    """Un corte por MAX_TOKENS_SALIDA se corta en el mismo lugar cada vez:
+    reintentar solo gastaría tres llamadas para el mismo resultado. Medido
+    contra SKU-110K, un tope de 4.000 tokens perdía 7 de 8 fotos y el
+    mensaje decía "JSON mal formado", que manda a arreglar lo que no era."""
+    from gondola.app import vision
+
+    llamadas = {"n": 0}
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        llamadas["n"] += 1
+        raise vision.LimiteDeSalida("agotó el tope de tokens")
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+
+    with pytest.raises(vision.LimiteDeSalida):
+        vision._llamar_con_reintento(None, "modelo-x", [])
+
+    assert llamadas["n"] == 1
+
+
+def test_finish_reason_length_se_reporta_como_tope_no_como_json_roto(monkeypatch):
+    """El proveedor devuelve 200 con el JSON cortado a la mitad. Si eso
+    saliera como VisionError genérico, el reintento lo trataría como bucle
+    transitorio y la causa real quedaría escondida."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+
+    class RespuestaCortada:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {
+                "choices": [{
+                    "message": {"content": '{"calidad_foto": "buena", "detec'},
+                    "finish_reason": "length",
+                }],
+                "usage": {"completion_tokens": 12000},
+            }
+
+    class ClienteFalso:
+        @staticmethod
+        def post(*_args, **_kwargs):
+            return RespuestaCortada()
+
+    with pytest.raises(vision.LimiteDeSalida) as exc:
+        vision._llamar_modelo(ClienteFalso(), "modelo-x", [])
+
+    assert "12000" in str(exc.value)

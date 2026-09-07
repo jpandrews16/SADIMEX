@@ -46,6 +46,15 @@ class VisionError(RuntimeError):
     """El modelo no devolvió una observación utilizable."""
 
 
+class LimiteDeSalida(VisionError):
+    """La respuesta se cortó por el tope de tokens, no por un fallo.
+
+    Se separa porque no tiene sentido reintentarla: el mismo prompt con el
+    mismo tope se vuelve a cortar en el mismo lugar. Lo que hay que hacer
+    es subir el tope o pedirle menos al modelo.
+    """
+
+
 class CuotaDiaria:
     """Tope de llamadas extra por día, como fracción de las fotos del día.
 
@@ -227,7 +236,20 @@ def _llamar_modelo(
     if "choices" not in data or not data["choices"]:
         raise VisionError(f"Respuesta sin choices: {json.dumps(data)[:500]}")
 
-    contenido = data["choices"][0]["message"].get("content") or ""
+    eleccion = data["choices"][0]
+    contenido = eleccion["message"].get("content") or ""
+
+    # Un corte por límite de tokens no es un fallo transitorio: reintentar
+    # da exactamente lo mismo. Se distingue para que el mensaje diga qué
+    # hacer (subir MAX_TOKENS_SALIDA) en vez de "JSON mal formado".
+    if eleccion.get("finish_reason") == "length":
+        usados = (data.get("usage") or {}).get("completion_tokens", "?")
+        raise LimiteDeSalida(
+            f"{modelo} agotó el tope de {cfg.max_tokens_salida} tokens de salida "
+            f"(usó {usados}) y la respuesta quedó cortada. Sube MAX_TOKENS_SALIDA "
+            f"o reduce el catálogo de la categoría."
+        )
+
     return _extraer_json(contenido), data.get("usage") or {}, duracion_ms
 
 
@@ -271,6 +293,8 @@ def _llamar_con_reintento(
                     intento, modelo, temp,
                 )
             return bruto, uso, gastado_ms + ms
+        except LimiteDeSalida:
+            raise  # reintentar con el mismo tope se corta en el mismo lugar
         except VisionError as exc:
             texto = str(exc)
             if "OpenRouter 4" in texto:

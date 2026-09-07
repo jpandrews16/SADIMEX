@@ -80,10 +80,12 @@ class Settings(BaseSettings):
     # de modelo.
     preferencia_proveedor: str = ""
 
-    # Tope duro de tokens de salida. Una foto normal usa ~1.200; esto corta
-    # al modelo si se pone a divagar, que es cuando una foto tarda tres
-    # minutos en vez de veinte segundos.
-    max_tokens_salida: int = 4000
+    # Tope duro de tokens de salida. Con un catálogo acotado una foto usa
+    # ~1.200, pero una góndola densa con muchos SKU propios puede pedir
+    # bastante más: medido contra SKU-110K, enumerar 42 productos ya se
+    # come 4.000 tokens. Un tope corto no ahorra —corta la respuesta y la
+    # foto se pierde—, así que se deja holgado: solo se paga lo que se usa.
+    max_tokens_salida: int = 12000
 
     # El proveedor corta la respuesta a media generación cada tanto, y la
     # devuelve con finish_reason "stop" como si estuviera completa: el JSON
