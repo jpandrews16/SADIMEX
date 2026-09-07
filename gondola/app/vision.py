@@ -146,6 +146,11 @@ def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:
         d["nivel"] = max(1, int(d.get("nivel") or 1))
         d["frentes"] = max(1, int(d.get("frentes") or 1))
         d["confianza"] = min(1.0, max(0.0, float(d.get("confianza") or 0.0)))
+        # El modelo devuelve la caja como dos enteros planos porque el
+        # objeto anidado lo hace generar JSON roto (ver prompt.py); acá se
+        # vuelve a armar el bbox que usa el motor de reglas.
+        if "bbox" not in d:
+            d["bbox"] = {"x0": int(d.pop("x0", 0) or 0), "x1": int(d.pop("x1", 1000) or 0)}
         detecciones.append(d)
     bruto["detecciones"] = detecciones
 
@@ -180,9 +185,17 @@ def _llamar_modelo(
         # La primera lectura va con 0: la misma foto debe dar el mismo
         # resultado. La de verificación sube la temperatura a propósito.
         "temperature": temperatura,
+        # La latencia de esta llamada es casi toda generación de salida:
+        # medido, ~16 ms por token. El tope evita que una respuesta que se
+        # descarrila convierta una foto de 30 s en uno de tres minutos.
+        "max_tokens": cfg.max_tokens_salida,
         # Pide a OpenRouter el costo real de la llamada.
         "usage": {"include": True},
     }
+    if cfg.preferencia_proveedor:
+        # OpenRouter sirve el mismo modelo desde varios proveedores, con
+        # velocidades muy distintas. Sin esto toma el que le toque.
+        payload["provider"] = {"sort": cfg.preferencia_proveedor}
 
     inicio = time.monotonic()
     resp = client.post(
@@ -202,6 +215,62 @@ def _llamar_modelo(
 
     contenido = data["choices"][0]["message"].get("content") or ""
     return _extraer_json(contenido), data.get("usage") or {}, duracion_ms
+
+
+def _llamar_con_reintento(
+    client: httpx.Client, modelo: str, mensajes: list[dict], temperatura: float = 0.0
+) -> tuple[dict, dict, int]:
+    """Llama al modelo reintentando, con más temperatura en cada intento.
+
+    El modelo entra a veces en un bucle degenerado —se queda escribiendo
+    tabuladores en vez de cerrar el JSON— y el proveedor devuelve eso como
+    respuesta terminada. Medido contra Qwen3-VL 32B sobre la misma foto,
+    pasa aproximadamente 1 de cada 3 veces.
+
+    La clave está en **subir la temperatura en cada reintento**. Con 0, la
+    decodificación es voraz y determinista: repetir la petición idéntica
+    reproduce exactamente el mismo bucle, así que reintentar no serviría de
+    nada. Un poco de aleatoriedad es justo lo que rompe el ciclo.
+
+    No tiene que ver con la foto: la misma imagen funciona al segundo
+    intento. Darla por perdida sería mandar a un reponedor a repetir un
+    trabajo que hizo bien.
+
+    Lo que NO se reintenta: un 4xx de OpenRouter, que significa que la
+    petición está mal armada y volver a mandarla daría lo mismo.
+    """
+    cfg = get_settings()
+    ultimo: Optional[VisionError] = None
+    gastado_ms = 0
+    intentos = max(1, cfg.reintentos_respuesta_invalida)
+
+    for intento in range(1, intentos + 1):
+        # 0.0 → 0.35 → 0.70 …: suficiente para salir del bucle sin perder
+        # el apego a lo que la foto muestra.
+        temp = temperatura + (intento - 1) * 0.35
+        inicio = time.monotonic()
+        try:
+            bruto, uso, ms = _llamar_modelo(client, modelo, mensajes, temp)
+            if intento > 1:
+                log.info(
+                    "Respuesta válida al intento %d con %s (temperatura %.2f)",
+                    intento, modelo, temp,
+                )
+            return bruto, uso, gastado_ms + ms
+        except VisionError as exc:
+            texto = str(exc)
+            if "OpenRouter 4" in texto:
+                raise  # petición mal armada: reintentar no cambia nada
+            ultimo = exc
+            # El intento fallido igual consumió tiempo de pared; si no se
+            # sumara, el reporte de latencia mentiría.
+            gastado_ms += int((time.monotonic() - inicio) * 1000)
+            log.warning(
+                "Respuesta inutilizable de %s (intento %d, temperatura %.2f): %s",
+                modelo, intento, temp, texto[:160],
+            )
+
+    raise ultimo or VisionError(f"{modelo} no devolvió una respuesta utilizable.")
 
 
 class _Gasto:
@@ -275,7 +344,7 @@ def analizar_foto(
         cuota_verificacion.registrar_foto()
         cuota_escalado.registrar_foto()
 
-        bruto, uso, ms = _llamar_modelo(client, cfg.modelo_primario, mensajes)
+        bruto, uso, ms = _llamar_con_reintento(client, cfg.modelo_primario, mensajes)
         gasto.sumar(uso, ms)
         obs = _normalizar(bruto, codigos)
         modelo_usado, escalado, nota = cfg.modelo_primario, False, None
@@ -305,7 +374,7 @@ def analizar_foto(
         if estrategia == "consenso":
             cuota_verificacion.registrar_uso()
             try:
-                bruto2, uso2, ms2 = _llamar_modelo(
+                bruto2, uso2, ms2 = _llamar_con_reintento(
                     client,
                     cfg.modelo_primario,
                     construir_mensajes_verificacion(*args_prompt),
@@ -327,7 +396,7 @@ def analizar_foto(
                 ):
                     log.info("Acuerdo de solo %.0f%%: se escala a %s", acuerdo.indice * 100, cfg.modelo_escalado)
                     cuota_escalado.registrar_uso()
-                    bruto3, uso3, ms3 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
+                    bruto3, uso3, ms3 = _llamar_con_reintento(client, cfg.modelo_escalado, mensajes)
                     gasto.sumar(uso3, ms3)
                     obs3 = _normalizar(bruto3, codigos)
                     obs, modelo_usado, escalado = obs3, cfg.modelo_escalado, True
@@ -348,7 +417,7 @@ def analizar_foto(
             else:
                 cuota_escalado.registrar_uso()
                 try:
-                    bruto2, uso2, ms2 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
+                    bruto2, uso2, ms2 = _llamar_con_reintento(client, cfg.modelo_escalado, mensajes)
                     gasto.sumar(uso2, ms2)
                     obs2 = _normalizar(bruto2, codigos)
                     if obs2.confianza_global >= obs.confianza_global:

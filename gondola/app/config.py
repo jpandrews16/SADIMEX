@@ -73,6 +73,25 @@ class Settings(BaseSettings):
     # 0 desactiva el escalado; 1.0 lo deja sin tope.
     escalado_max_fraccion_diaria: float = 0.20
 
+    # Preferencia de proveedor en OpenRouter ("throughput" el más rápido,
+    # "price" el más barato). Vacío por defecto: se midió contra Qwen3-VL
+    # 32B y no aportó nada —sirvió el mismo proveedor y tardó más— así que
+    # no vale la pena restringir el enrutado. Vuelve a medirlo si cambias
+    # de modelo.
+    preferencia_proveedor: str = ""
+
+    # Tope duro de tokens de salida. Una foto normal usa ~1.200; esto corta
+    # al modelo si se pone a divagar, que es cuando una foto tarda tres
+    # minutos en vez de veinte segundos.
+    max_tokens_salida: int = 4000
+
+    # El proveedor corta la respuesta a media generación cada tanto, y la
+    # devuelve con finish_reason "stop" como si estuviera completa: el JSON
+    # llega partido. Medido en la práctica, pasa en torno a 1 de cada 3
+    # llamadas. Es transitorio, así que se reintenta en vez de dar la foto
+    # por perdida.
+    reintentos_respuesta_invalida: int = 3
+
     # Identificación de la app ante OpenRouter (aparece en su dashboard).
     app_url: str = "https://sadimex.com"
     app_title: str = "SADIMEX Lector de Gondola"
@@ -84,8 +103,12 @@ class Settings(BaseSettings):
     # ── Worker ───────────────────────────────────────────────────────
     worker_intervalo_segundos: float = 5.0
     worker_max_intentos: int = 3
-    # Fotos procesadas a la vez. Subir con cuidado: pega en el rate limit.
-    worker_concurrencia: int = 2
+    # Fotos procesadas a la vez por réplica. El trabajo es esperar a
+    # OpenRouter, no calcular, así que subirlo escala casi lineal el
+    # rendimiento sin más CPU: con 30 s por foto, 6 en paralelo son ~12
+    # fotos por minuto por réplica. El techo real es el rate limit de tu
+    # cuenta de OpenRouter, no el worker.
+    worker_concurrencia: int = 6
 
     # ── Imagen ───────────────────────────────────────────────────────
     # La góndola se manda en alta resolución; más de esto no aporta y sí cuesta.

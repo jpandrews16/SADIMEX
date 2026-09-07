@@ -360,6 +360,54 @@ verificados contra su API — cámbialos por lo que te dé la comparación):
 
 ---
 
+## Latencia y fiabilidad
+
+Medido contra Qwen3-VL 32B sobre la misma foto, ocho corridas seguidas:
+
+| | Antes | Ahora |
+|---|---|---|
+| Tiempo por foto | 57,6 s | **13,6 s** |
+| Tokens de salida | 3.659 | **1.054** |
+| Detecciones | 21 (una por unidad) | **6** (una por grupo) |
+| Fotos analizadas sin error | — | **8 de 8** |
+
+Tres cosas explicaban los 57 segundos, y ninguna era la que uno supondría:
+
+**1. La latencia es toda de salida.** Los 2.116 tokens de entrada (foto
+incluida) no cuestan casi nada; los de salida se generan uno por uno a
+~16 ms. Así que el esquema pide **solo los campos que alguna regla usa**:
+se fueron `y0`/`y1` de la detección, la caja de las etiquetas y los
+huecos, y el SKU sugerido.
+
+**2. El modelo no agrupaba.** Devolvía una detección por unidad: 21 items
+para 6 grupos de producto. El prompt ahora exige que una fila de N
+unidades iguales sea **una** detección con `frentes: N`. El conteo total
+sigue siendo exacto (21 frentes) con una cuarta parte de los tokens.
+
+**3. Nada de objetos anidados en el esquema.** La caja va como dos enteros
+planos, `x0` y `x1`. Con el objeto `bbox` anidado, el decodificador
+restringido del proveedor se atasca en un bucle de tabuladores y devuelve
+JSON roto. Esto **ya pasaba antes** —1 de cada 3 llamadas— y se perdía
+silenciosamente: la foto quedaba marcada como error.
+
+Contra ese bucle, los reintentos **suben la temperatura en cada vuelta**
+(0 → 0,35 → 0,70). Con temperatura 0 la decodificación es determinista y
+repetir la misma petición reproduce exactamente el mismo fallo; un poco de
+aleatoriedad es lo que rompe el ciclo. Con eso, 8 de 8 fotos analizadas.
+
+**Rendimiento del worker.** El trabajo es esperar a OpenRouter, no
+calcular, así que la concurrencia escala casi lineal:
+
+| Réplicas × 6 en paralelo | Fotos/min | 500 fotos |
+|---|---|---|
+| 1 | 26 | 19 min |
+| 2 | 53 | 9 min |
+| 3 | 79 | 6 min |
+
+El techo real es el rate limit de tu cuenta de OpenRouter, no el worker.
+
+---
+
 ## Control de costo con volumen alto
 
 Muchas categorías y muchas fotos hacen que la factura sea un KPI

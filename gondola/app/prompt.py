@@ -21,11 +21,12 @@ Reglas que no puedes romper:
 1. Solo reportas SKU que estén en el CATÁLOGO que se te entrega. Si ves un producto de otra marca, NO lo reportes como detección: solo cuéntalo dentro de `frentes_totales_lineal`.
 2. Si no estás seguro de cuál variante exacta es, reporta el SKU más probable con una confianza BAJA (por ejemplo 0.45). Nunca inventes un código que no esté en el catálogo.
 3. Los niveles se cuentan desde ABAJO: nivel 1 = la bandeja más cercana al piso.
-4. "Frentes" (facings) es cuántas unidades del producto se ven de frente en una fila horizontal. No cuentes las de atrás en profundidad.
-5. Las coordenadas `bbox` van normalizadas de 0 a 1000 sobre la imagen: [x0, y0, x1, y1], con origen arriba a la izquierda.
-6. Para cada etiqueta de precio del riel, asocia `sku_asociado` al producto que está JUSTO ENCIMA de ella. Si no hay producto encima o no lo reconoces, deja `sku_asociado` en null.
-7. Lee los precios tal como aparecen impresos. Si el número está borroso o cortado, marca `legible: false` y deja `precio_leido` en null. Nunca adivines un precio.
-8. Responde SIEMPRE en el formato JSON pedido, sin texto adicional ni markdown."""
+4. AGRUPA. Un item de `detecciones` representa un GRUPO de unidades del mismo SKU juntas en la misma bandeja, no una unidad suelta. Si ves 5 paquetes iguales en fila, eso es UNA detección con `frentes: 5`, nunca cinco detecciones de un frente. Solo abres una segunda detección del mismo SKU si está en otra bandeja o separado por otro producto.
+5. "Frentes" (facings) es cuántas unidades se ven de frente en esa fila horizontal. No cuentes las de atrás en profundidad.
+6. `x0` y `x1` son el borde izquierdo y derecho del grupo, normalizados de 0 a 1000 sobre el ancho de la imagen.
+7. Para cada etiqueta de precio del riel, asocia `sku_asociado` al producto que está JUSTO ENCIMA de ella. Si no hay producto encima o no lo reconoces, deja `sku_asociado` en null.
+8. Lee los precios tal como aparecen impresos. Si el número está borroso o cortado, marca `legible: false` y deja `precio_leido` en null. Nunca adivines un precio.
+9. Responde SIEMPRE en el formato JSON pedido, sin texto adicional ni markdown."""
 
 
 def _catalogo_texto(skus: Sequence[Sku]) -> str:
@@ -96,7 +97,7 @@ def construir_mensajes(
                 "- mueble_completo_visible: false si la foto corta el mueble por arriba o por abajo.\n"
                 "- frentes_totales_lineal: frentes de TODAS las marcas en la sección visible, "
                 "incluida la competencia. Es el denominador del share of shelf.\n"
-                "- detecciones: un item por cada SKU del catálogo que veas.\n"
+                "- detecciones: un item por cada GRUPO de unidades del mismo SKU en una bandeja.\n"
                 "- huecos: espacios vacíos en las bandejas.\n"
                 "- etiquetas: cada etiqueta de precio del riel.\n"
                 "- confianza_global: qué tan confiable es tu lectura completa de esta foto (0 a 1). "
@@ -125,6 +126,7 @@ MÉTODO OBLIGATORIO PARA ESTA LECTURA:
 Recorre la góndola BANDEJA POR BANDEJA, empezando por la más baja (nivel 1) y subiendo.
 Para cada bandeja, avanza de IZQUIERDA A DERECHA y ve nombrando lo que encuentras antes de contar.
 Cuenta las unidades de frente de UNA EN UNA; no estimes "varias" ni redondees a un número redondo.
+Reporta cada fila de unidades iguales como UNA detección con su total en `frentes`, no como una detección por unidad.
 Si en una fila hay muchas unidades iguales, cuéntalas dos veces antes de responder.
 Trata cada bandeja como un problema separado: no asumas que se repite lo de la bandeja anterior."""
 
@@ -144,17 +146,24 @@ def construir_mensajes_verificacion(
 
 # Esquema estricto. Forzarlo por `response_format` evita el parseo frágil
 # de JSON dentro de bloques markdown.
-BBOX_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "x0": {"type": "integer"},
-        "y0": {"type": "integer"},
-        "x1": {"type": "integer"},
-        "y1": {"type": "integer"},
-    },
-    "required": ["x0", "y0", "x1", "y1"],
-    "additionalProperties": False,
-}
+#
+# Dos decisiones acá salieron de medir, no de suponer:
+#
+# 1. **Solo se pide lo que alguna regla usa.** Cada campo se paga dos
+#    veces: en dinero y —sobre todo— en latencia, porque el modelo genera
+#    la salida token por token, a ~16 ms cada uno. Quitar los campos
+#    muertos (y0/y1 de la detección, la caja de etiquetas y huecos, el SKU
+#    sugerido) bajó la salida de 3.659 a ~1.200 tokens.
+#
+# 2. **Nada de objetos anidados.** La caja del producto va como dos
+#    enteros planos, x0 y x1, y no como un objeto `bbox`. Medido sobre la
+#    misma foto: con el objeto anidado el modelo se atasca en un bucle de
+#    tabuladores y devuelve JSON roto 2 de cada 3 veces; con los campos
+#    planos, 1 de cada 3. El decodificador restringido del proveedor
+#    tropieza con la estructura anidada.
+#
+# Si mañana una regla nueva necesita otro campo, se agrega aquí —pero
+# midiendo antes y después, porque el costo no es solo de tokens.
 
 OBSERVACION_SCHEMA = {
     "type": "object",
@@ -174,10 +183,11 @@ OBSERVACION_SCHEMA = {
                     "confianza": {"type": "number"},
                     "nivel": {"type": "integer"},
                     "frentes": {"type": "integer"},
-                    "bbox": BBOX_SCHEMA,
+                    "x0": {"type": "integer", "description": "Borde izquierdo del grupo, 0-1000"},
+                    "x1": {"type": "integer", "description": "Borde derecho del grupo, 0-1000"},
                     "frenteado": {"type": "boolean"},
                 },
-                "required": ["sku_codigo", "confianza", "nivel", "frentes", "bbox", "frenteado"],
+                "required": ["sku_codigo", "confianza", "nivel", "frentes", "x0", "x1", "frenteado"],
                 "additionalProperties": False,
             },
         },
@@ -187,11 +197,9 @@ OBSERVACION_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "nivel": {"type": "integer"},
-                    "bbox": BBOX_SCHEMA,
                     "ancho_frentes_aprox": {"type": "integer"},
-                    "sku_codigo_sugerido": {"type": ["string", "null"]},
                 },
-                "required": ["nivel", "bbox", "ancho_frentes_aprox", "sku_codigo_sugerido"],
+                "required": ["nivel", "ancho_frentes_aprox"],
                 "additionalProperties": False,
             },
         },
@@ -205,14 +213,13 @@ OBSERVACION_SCHEMA = {
                     "moneda": {"type": "string"},
                     "legible": {"type": "boolean"},
                     "nivel": {"type": "integer"},
-                    "bbox": BBOX_SCHEMA,
                     "sku_asociado": {"type": ["string", "null"]},
                     "confianza": {"type": "number"},
                     "es_promocion": {"type": "boolean"},
                 },
                 "required": [
                     "texto_producto", "precio_leido", "moneda", "legible",
-                    "nivel", "bbox", "sku_asociado", "confianza", "es_promocion",
+                    "nivel", "sku_asociado", "confianza", "es_promocion",
                 ],
                 "additionalProperties": False,
             },
