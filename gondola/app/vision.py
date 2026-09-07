@@ -113,7 +113,13 @@ def _headers() -> dict[str, str]:
 
 
 def _extraer_json(texto: str) -> dict:
-    """Parsea la respuesta aunque el modelo la envuelva en markdown."""
+    """Parsea la respuesta aunque el modelo la envuelva en markdown.
+
+    Todo fallo sale como `VisionError`, nunca como `JSONDecodeError`: es lo
+    que permite que `_llamar_con_reintento` lo capture y vuelva a pedir.
+    Dejar escapar la excepción de json haría reventar al worker con una
+    respuesta truncada, que es justo el caso que hay que reintentar.
+    """
     texto = texto.strip()
     if texto.startswith("```"):
         texto = texto.split("```", 2)[1]
@@ -123,10 +129,18 @@ def _extraer_json(texto: str) -> dict:
     try:
         return json.loads(texto)
     except json.JSONDecodeError:
-        inicio, fin = texto.find("{"), texto.rfind("}")
-        if inicio == -1 or fin <= inicio:
-            raise VisionError(f"Respuesta sin JSON reconocible: {texto[:300]}")
+        pass
+
+    # Segundo intento: recortar a las llaves exteriores, por si el modelo
+    # adornó la respuesta. Si el JSON viene partido a la mitad esto también
+    # falla, y ahí sí no hay nada que rescatar.
+    inicio, fin = texto.find("{"), texto.rfind("}")
+    if inicio == -1 or fin <= inicio:
+        raise VisionError(f"Respuesta sin JSON reconocible: {texto[:300]}")
+    try:
         return json.loads(texto[inicio : fin + 1])
+    except json.JSONDecodeError as exc:
+        raise VisionError(f"JSON incompleto o mal formado: {exc}") from exc
 
 
 def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:

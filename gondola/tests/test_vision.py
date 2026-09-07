@@ -417,3 +417,44 @@ def test_los_interruptores_de_configuracion_apagan_un_motivo(
 
     assert len(llamadas) == 1
     assert uso.lecturas == 1
+
+
+@pytest.mark.parametrize(
+    "truncado",
+    [
+        # Cortado antes de cerrar nada.
+        '{"calidad_foto": "buena", "detecciones": [{"sku_codigo": "A", "conf',
+        # Cortado pero con una llave de cierre suelta: el recorte a las
+        # llaves exteriores tampoco salva este.
+        '{"calidad_foto": "buena", "detecciones": [{"sku_codigo": "A"}, {"sku',
+        # El bucle de tabuladores que devuelve el proveedor en la práctica.
+        '{\n  "calidad_foto":  \t\t\t\t\n  "mala",\n  "detecciones": [\n    {\n      "x0": \t\t\t\n      \t\t\t\n',
+    ],
+)
+def test_un_json_truncado_sale_como_VisionError_no_como_JSONDecodeError(truncado):
+    """Si escapara el JSONDecodeError, el reintento no lo capturaría y el
+    worker reventaría con una respuesta partida, que es justo el caso que
+    hay que reintentar."""
+    with pytest.raises(VisionError):
+        _extraer_json(truncado)
+
+
+def test_una_respuesta_truncada_se_reintenta_en_vez_de_matar_la_foto(skus_min, monkeypatch):
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    intentos = {"n": 0}
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        intentos["n"] += 1
+        if intentos["n"] == 1:
+            # Lo que devuelve el proveedor cuando corta la generación.
+            return vision._extraer_json('{"calidad_foto": "buena", "detec'), {}, 100
+        return _respuesta(0.95), {"cost": 0.0001}, 100
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+
+    obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert intentos["n"] == 2
+    assert obs.confianza_global == 0.95
