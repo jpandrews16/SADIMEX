@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Iterable, Optional
 
+from .config import get_settings
 from .schemas import (
     Deteccion,
     Etiqueta,
@@ -220,23 +221,52 @@ def evaluar_frentes(
         (r.share_minimo_pct for r in reglas.values() if r.share_minimo_pct is not None),
         default=None,
     )
-    if share_exigido is not None and share is not None:
+
+    # El share of shelf se informa, pero NO puntúa mientras el conteo del
+    # lineal no sea confiable.
+    #
+    # Medido contra SKU-110K —11.762 fotos de góndola con 1,73 millones de
+    # productos marcados a mano—, el conteo total del lineal se equivoca en
+    # torno al 50%, y en fotos de pasillo en diagonal directamente falla.
+    # El numerador (nuestros frentes) es fácil: son pocas unidades de
+    # productos que el modelo tiene en la hoja de referencia. El
+    # denominador es contar cien envases ajenos, que es lo que un modelo de
+    # visión hace peor.
+    #
+    # Un reponedor no puede perder el bono por un denominador con 50% de
+    # error, así que el share entra al informe como dato y se queda fuera
+    # de la nota hasta que se mida bien sobre fotos de nuestras salas.
+    # Súbelo con SHARE_OF_SHELF_PUNTUA=true recién cuando eso esté hecho.
+    share_puntua = get_settings().share_of_shelf_puntua
+    if share_puntua and share_exigido is not None and share is not None:
         puntajes.append(min(1.0, share / share_exigido) if share_exigido > 0 else 1.0)
 
     if not puntajes:
         return None, share
 
     cumplimiento = sum(puntajes) / len(puntajes)
-    detalle_share = f" Share of shelf: {share}%." if share is not None else ""
-    if share_exigido is not None:
+    if share is None:
+        detalle_share = ""
+    elif share_puntua:
+        detalle_share = f" Share of shelf: {share}%."
+    else:
+        detalle_share = f" Share of shelf: {share}% (referencial, no puntúa)."
+    if share_exigido is not None and share_puntua:
         detalle_share += f" Mínimo exigido: {share_exigido}%."
+
+    incumple_share = (
+        share_puntua and share_exigido is not None and share is not None and share < share_exigido
+    )
+    exigido = "Frentes mínimos por SKU"
+    if share_exigido is not None and share_puntua:
+        exigido += f" y {share_exigido}% de share"
 
     return (
         ResultadoRegla(
             regla="frentes",
-            cumple=not faltantes and (share_exigido is None or share is None or share >= share_exigido),
+            cumple=not faltantes and not incumple_share,
             cumplimiento=cumplimiento,
-            esperado=f"Frentes mínimos por SKU{f' y {share_exigido}% de share' if share_exigido else ''}",
+            esperado=exigido,
             obtenido=f"{frentes_nuestros} frentes propios de {obs.frentes_totales_lineal or '?'} del lineal",
             detalle=(("Bajo el mínimo: " + ", ".join(faltantes)) if faltantes else "Frentes en regla.")
             + detalle_share,

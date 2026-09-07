@@ -98,6 +98,24 @@ class Settings(BaseSettings):
     app_url: str = "https://sadimex.com"
     app_title: str = "SADIMEX Lector de Gondola"
 
+    # ¿El share of shelf puntúa, o solo se informa?
+    #
+    # Apagado a propósito. Medido contra SKU-110K —fotos de góndola con
+    # 1,73 millones de productos marcados a mano—, el conteo total del
+    # lineal se equivoca alrededor de un 50%: el modelo cuenta bien
+    # nuestros pocos frentes, pero contar cien envases ajenos es lo que
+    # peor hace. Ese conteo es el DENOMINADOR del share, así que el share
+    # hereda el error entero.
+    #
+    # Con ese margen, un reponedor podría perder el bono por un número mal
+    # contado. El share sale igual en el informe, marcado como referencial,
+    # y la regla de frentes puntúa solo contra los mínimos por SKU, que se
+    # miden sobre nuestros propios productos y sí son confiables.
+    #
+    # Enciéndelo cuando el conteo esté medido sobre fotos de nuestras salas
+    # anotadas a mano, no antes.
+    share_of_shelf_puntua: bool = False
+
     # ── Umbrales de semáforo (mismos que el módulo de audio) ─────────
     umbral_verde: int = 80
     umbral_amarillo: int = 60

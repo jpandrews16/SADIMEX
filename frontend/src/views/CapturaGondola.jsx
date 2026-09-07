@@ -43,8 +43,8 @@ function Instrucciones() {
                 Cómo tomar la foto
             </div>
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--text-2)', lineHeight: 1.65 }}>
+                <li><strong>Parate de frente al mueble</strong>, nunca en diagonal por el pasillo. Es lo que más falla: en diagonal las bandejas se van de fuga y el conteo sale mal.</li>
                 <li><strong>El mueble completo</strong>, de piso a bandeja de arriba.</li>
-                <li>De frente, no en diagonal.</li>
                 <li>Que se lean las <strong>etiquetas de precio</strong> del riel.</li>
                 <li>Sin flash si hay reflejo en el vidrio.</li>
                 <li>Si la góndola es muy larga, una foto por tramo.</li>

@@ -209,13 +209,31 @@ def test_share_of_shelf_se_calcula_sobre_el_lineal_completo(skus, reglas, precio
     assert ev.share_of_shelf_pct == 20.0
 
 
-def test_share_bajo_el_minimo_penaliza(skus, precios):
-    reglas = {
+def _reglas_con_share() -> dict[str, Regla]:
+    return {
         "NOEL-FESTIVAL-200": Regla(frentes_minimos=1, share_minimo_pct=40.0),
         "NOEL-SALTIN-250": Regla(frentes_minimos=1, share_minimo_pct=40.0),
         "WILD-FRESA": Regla(exige_presencia=False),
     }
-    ev = evaluar(observacion_perfecta(), skus, reglas, precios)
+
+
+def test_share_bajo_el_minimo_no_castiga_por_defecto(skus, precios):
+    """El conteo del lineal se equivoca ~50% (medido contra SKU-110K), y es
+    el denominador del share. Un reponedor no puede perder el bono por eso,
+    así que el share se informa pero no puntúa mientras siga sin medirse
+    bien sobre fotos de nuestras salas."""
+    ev = evaluar(observacion_perfecta(), skus, _reglas_con_share(), precios)
+
+    assert ev.share_of_shelf_pct == 20.0  # se sigue informando
+    assert ev.reglas["frentes"].cumple
+    assert "referencial" in ev.reglas["frentes"].detalle
+
+
+def test_share_bajo_el_minimo_penaliza_si_se_activa(skus, precios, monkeypatch):
+    from gondola.app import rules
+
+    monkeypatch.setattr(rules.get_settings(), "share_of_shelf_puntua", True, raising=False)
+    ev = evaluar(observacion_perfecta(), skus, _reglas_con_share(), precios)
     # 20% real contra 40% exigido = medio punto en la parte de share.
     assert not ev.reglas["frentes"].cumple
     assert ev.reglas["frentes"].cumplimiento < 1.0
