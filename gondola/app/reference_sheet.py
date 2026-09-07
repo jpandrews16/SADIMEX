@@ -51,6 +51,26 @@ def _fuente(tam: int = 15) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def _ancho(texto: str, fuente: ImageFont.ImageFont) -> int:
+    caja = fuente.getbbox(texto)
+    return caja[2] - caja[0]
+
+
+def _fuente_que_entra(texto: str, ancho_max: int) -> ImageFont.ImageFont:
+    """La fuente más grande con la que el código entra en su celda.
+
+    Los códigos reales son largos (`FESTIVAL-SABORLIMON-2016G`) y con
+    tamaño fijo se salían de la celda y se superponían con el rótulo
+    vecino. El modelo tiene que poder leer el código completo: si lee uno
+    partido, responde con un SKU que no existe y la detección se descarta.
+    """
+    for tam in range(15, 7, -1):
+        fuente = _fuente(tam)
+        if _ancho(texto, fuente) <= ancho_max:
+            return fuente
+    return _fuente(8)
+
+
 def _descargar(client: httpx.Client, url: str, lado: int) -> Optional[Image.Image]:
     try:
         # Un packshot también puede ser un archivo local. Sirve para probar
@@ -120,7 +140,6 @@ def construir_hoja_referencia(skus: Sequence[Sku]) -> Optional[str]:
 
     hoja = Image.new("RGB", (columnas * celda_w, filas * celda_h), FONDO)
     dibujo = ImageDraw.Draw(hoja)
-    fuente = _fuente()
 
     with httpx.Client(follow_redirects=True) as client:
         for i, sku in enumerate(con_foto):
@@ -133,12 +152,15 @@ def construir_hoja_referencia(skus: Sequence[Sku]) -> Optional[str]:
                 hoja.paste(img, (x0 + (celda_w - img.width) // 2, y0 + (lado - img.height) // 2))
 
             # El rótulo es lo que hace útil el mosaico: el modelo responde
-            # con este código exacto, no con un nombre libre.
+            # con este código exacto, no con un nombre libre. Por eso tiene
+            # que entrar ENTERO y dentro de su celda: con códigos largos se
+            # salía y se pisaba con el rótulo de al lado, y ahí el modelo
+            # lee un código que no existe.
             dibujo.text(
                 (x0 + 6, y0 + lado + 8),
-                sku.codigo[:28],
+                sku.codigo,
                 fill=TEXTO,
-                font=fuente,
+                font=_fuente_que_entra(sku.codigo, celda_w - 12),
             )
 
     buffer = io.BytesIO()

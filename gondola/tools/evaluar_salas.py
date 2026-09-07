@@ -90,6 +90,16 @@ def main() -> int:
     parser.add_argument("--fotos", required=True, help="Carpeta con las fotos")
     parser.add_argument("--catalogo", required=True, help="Catálogo JSON")
     parser.add_argument("--anotaciones", required=True, help="CSV foto,skus")
+    parser.add_argument(
+        "--mapa",
+        help=(
+            "JSON {codigo_sku: grupo}. El modelo trabaja con el catálogo fino "
+            "—que es lo real y lo difícil— pero se puntúa contra el grupo. "
+            "Sirve cuando quien anotó las fotos apuntó la marca y no la "
+            "variante exacta: mide identificación real sin inventar una "
+            "verdad de referencia que nadie verificó."
+        ),
+    )
     parser.add_argument("--categoria", default="galletas")
     parser.add_argument("--cadena", default="")
     parser.add_argument("--salida", help="Guarda el detalle en este JSON")
@@ -101,6 +111,9 @@ def main() -> int:
         return 1
 
     skus = cargar_catalogo(Path(args.catalogo))
+    mapa: dict[str, str] = (
+        json.loads(Path(args.mapa).read_text(encoding="utf-8")) if args.mapa else {}
+    )
     esperado = cargar_anotaciones(Path(args.anotaciones))
     carpeta = Path(args.fotos)
     fotos = sorted(p for p in carpeta.iterdir() if p.suffix.lower() in EXTENSIONES)
@@ -143,7 +156,9 @@ def main() -> int:
                 continue
 
             detectado = {
-                d.sku_codigo for d in obs.detecciones if d.confianza >= cfg.umbral_deteccion
+                mapa.get(d.sku_codigo, d.sku_codigo)
+                for d in obs.detecciones
+                if d.confianza >= cfg.umbral_deteccion
             }
             for codigo in real | detectado:
                 if codigo in real and codigo in detectado:
@@ -162,6 +177,15 @@ def main() -> int:
                 "foto": foto.name,
                 "esperado": sorted(real),
                 "detectado": sorted(detectado),
+                # La confianza de cada detección, para poder barrer el
+                # umbral después sin volver a pagar las llamadas. El 0.60
+                # que hay hoy se puso a ojo y nunca se midió.
+                "confianzas": sorted(
+                    ({"sku": d.sku_codigo, "grupo": mapa.get(d.sku_codigo, d.sku_codigo),
+                      "confianza": round(d.confianza, 3),
+                      "frentes": d.frentes, "nivel": d.nivel} for d in obs.detecciones),
+                    key=lambda x: -x["confianza"],
+                ),
                 "frentes_lineal": obs.frentes_totales_lineal,
                 "niveles": obs.niveles_visibles,
                 "calidad": obs.calidad_foto,

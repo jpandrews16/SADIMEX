@@ -74,3 +74,21 @@ def test_un_packshot_local_tambien_sirve(tmp_path):
 
     assert img is not None
     assert max(img.size) == 100
+
+
+def test_el_rotulo_entra_en_su_celda():
+    """Con tamaño fijo, un código largo se salía de la celda y se pisaba
+    con el rótulo de al lado. El modelo responde con el código que lee ahí:
+    si lo lee partido, devuelve un SKU inexistente y se descarta."""
+    from gondola.app.reference_sheet import _ancho, _fuente_que_entra
+
+    codigo = "FESTIVAL-SABORLIMON-2016G"
+    fuente = _fuente_que_entra(codigo, 208)
+
+    assert _ancho(codigo, fuente) <= 208
+
+
+def test_un_codigo_corto_conserva_la_letra_grande():
+    from gondola.app.reference_sheet import _fuente, _fuente_que_entra
+
+    assert _fuente_que_entra("NOEL-A", 208).size == _fuente(15).size
