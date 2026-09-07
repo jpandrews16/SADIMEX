@@ -80,6 +80,25 @@ class Settings(BaseSettings):
     # de modelo.
     preferencia_proveedor: str = ""
 
+    # Pedirle el JSON a OpenRouter con `response_format` (decodificación
+    # restringida por esquema) en vez de pedirlo en el prompt.
+    #
+    # Apagado porque MEDIDO ROMPE MÁS DE LO QUE ARREGLA. El decodificador
+    # restringido de este proveedor inserta tabuladores sueltos donde no
+    # van —se ven en la respuesta como `"frenteado": \ttrue`— y cada tanto
+    # se queda en bucle escribiendo tabuladores hasta que la respuesta se
+    # corta sin cerrar el JSON. Sobre 6 fotos de sala, con la hoja de
+    # referencia puesta: 3 de 6 con el esquema estricto, 6 de 6 sin él, y
+    # ni un tabulador de más.
+    #
+    # Sin esto el esquema viaja en el prompt como texto y el modelo escribe
+    # el JSON normalmente. `_extraer_json` ya tolera markdown alrededor, y
+    # `_normalizar` sanea el resultado igual, así que no se pierde
+    # validación: la que valía era la de Python, no la del proveedor.
+    #
+    # Vale volver a medirlo si cambias de modelo o de proveedor.
+    usar_response_format: bool = False
+
     # Tope duro de tokens de salida. Con un catálogo acotado una foto usa
     # ~1.200, pero una góndola densa con muchos SKU propios puede pedir
     # bastante más: medido contra SKU-110K, enumerar 42 productos ya se

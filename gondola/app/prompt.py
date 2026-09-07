@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from typing import Sequence
 
+from .config import get_settings
 from .schemas import Sku
 
 SYSTEM = """Eres un auditor de ejecución en punto de venta (retail execution) especializado en supermercados de Bolivia.
@@ -122,9 +123,26 @@ def construir_mensajes(
     contenido.append({"type": "image_url", "image_url": {"url": foto_data_url}})
 
     return [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": _system(SYSTEM)},
         {"role": "user", "content": contenido},
     ]
+
+
+def _system(base: str) -> str:
+    """Agrega el esquema al system cuando no se usa `response_format`.
+
+    El esquema tiene que llegar por algún lado. Que llegue como texto —y
+    no como decodificación restringida del proveedor— es lo que se midió
+    mejor: ver `usar_response_format` en config.py.
+    """
+    if get_settings().usar_response_format:
+        return base
+    return (
+        base
+        + "\n\nDevuelve EXCLUSIVAMENTE un objeto JSON válido que cumpla este "
+        "esquema, sin markdown y sin texto alrededor:\n"
+        + esquema_json_texto()
+    )
 
 
 # Segunda pasada de verificación. El enfoque tiene que ser DISTINTO al de
@@ -154,7 +172,7 @@ def construir_mensajes_verificacion(
 ) -> list[dict]:
     """Mensajes de la segunda lectura, con el método de conteo explícito."""
     mensajes = construir_mensajes(skus, foto_data_url, hoja_referencia, categoria, cadena)
-    mensajes[0] = {"role": "system", "content": SYSTEM_VERIFICACION}
+    mensajes[0] = {"role": "system", "content": _system(SYSTEM_VERIFICACION)}
     return mensajes
 
 

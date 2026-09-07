@@ -236,7 +236,6 @@ def _llamar_modelo(
     payload = {
         "model": modelo,
         "messages": mensajes,
-        "response_format": RESPONSE_FORMAT,
         # La primera lectura va con 0: la misma foto debe dar el mismo
         # resultado. La de verificación sube la temperatura a propósito.
         "temperature": temperatura,
@@ -247,6 +246,8 @@ def _llamar_modelo(
         # Pide a OpenRouter el costo real de la llamada.
         "usage": {"include": True},
     }
+    if cfg.usar_response_format:
+        payload["response_format"] = RESPONSE_FORMAT
     if cfg.preferencia_proveedor:
         # OpenRouter sirve el mismo modelo desde varios proveedores, con
         # velocidades muy distintas. Sin esto toma el que le toque.
