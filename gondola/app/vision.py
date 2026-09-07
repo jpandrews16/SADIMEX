@@ -439,6 +439,9 @@ def analizar_foto(
         raise VisionError("Falta OPENROUTER_API_KEY.")
 
     codigos = {s.codigo for s in skus}
+    # Para que el consenso distinga una duda de variante (Festival Fresa
+    # contra Festival Limón) de un desacuerdo real entre marcas.
+    marcas = {s.codigo: s.marca for s in skus}
     args_prompt = (skus, foto_data_url, hoja_referencia, categoria, cadena)
     mensajes = construir_mensajes(*args_prompt)
 
@@ -494,7 +497,7 @@ def analizar_foto(
                 )
                 gasto.sumar(uso2, ms2)
                 obs2 = _normalizar(bruto2, codigos)
-                obs, acuerdo = fusionar(obs, obs2)
+                obs, acuerdo = fusionar(obs, obs2, marcas)
                 nota = f"verificada ({motivos[0]}); {acuerdo.resumen()}"
 
                 # Tercer intento solo si las dos lecturas se contradicen de

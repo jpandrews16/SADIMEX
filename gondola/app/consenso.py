@@ -58,17 +58,26 @@ class Acuerdo:
 
     skus_en_ambas: list[str] = field(default_factory=list)
     skus_en_una: list[str] = field(default_factory=list)
+    # Las dos lecturas vieron el producto pero no coinciden en la variante.
+    # No es desacuerdo sobre la presencia: cuenta como acuerdo en el índice.
+    variantes_en_disputa: list[str] = field(default_factory=list)
     precios_descartados: list[str] = field(default_factory=list)
     huecos_descartados: int = 0
     niveles_discrepan: bool = False
 
     @property
     def indice(self) -> float:
-        """0.0-1.0. Jaccard de los SKU vistos por cada lectura."""
-        total = len(self.skus_en_ambas) + len(self.skus_en_una)
+        """0.0-1.0. Jaccard de los SKU vistos por cada lectura.
+
+        Una variante en disputa cuenta del lado del acuerdo: las dos
+        lecturas coincidieron en que ahí hay un producto nuestro, que es
+        lo que este índice mide.
+        """
+        de_acuerdo = len(self.skus_en_ambas) + len(self.variantes_en_disputa)
+        total = de_acuerdo + len(self.skus_en_una)
         if total == 0:
             return 1.0  # ninguna vio nada: coinciden en el vacío
-        return len(self.skus_en_ambas) / total
+        return de_acuerdo / total
 
     def resumen(self) -> str:
         partes = [f"acuerdo {self.indice:.0%}"]
@@ -88,9 +97,68 @@ class Acuerdo:
 # =====================================================================
 
 
-def _emparejar_detecciones(
-    a: list[Deteccion], b: list[Deteccion]
+def _se_solapan(a: Deteccion, b: Deteccion) -> bool:
+    """¿Las dos cajas ocupan el mismo tramo horizontal de la bandeja?"""
+    solape = min(a.bbox.x1, b.bbox.x1) - max(a.bbox.x0, b.bbox.x0)
+    menor = min(a.bbox.ancho, b.bbox.ancho)
+    return menor > 0 and solape > menor / 2
+
+
+def _disputas_de_variante(
+    huerfanas_a: list[Deteccion],
+    huerfanas_b: list[Deteccion],
+    marcas: dict[str, str],
 ) -> tuple[list[tuple[Deteccion, Deteccion]], list[Deteccion]]:
+    """Detecta el caso "las dos lecturas vieron el producto, discuten cuál es".
+
+    Con un catálogo fino esto es lo normal: una lectura dice
+    FESTIVAL-SABORFRESA y la otra FESTIVAL-SABORLIMON, en la misma bandeja
+    y en el mismo tramo. Emparejando por código exacto no casan, las dos
+    quedan huérfanas, las dos se castigan y el producto desaparece —aunque
+    las dos lecturas coincidieron en que ahí hay algo nuestro—.
+
+    Eso invierte el criterio del módulo. El castigo existe para no AFIRMAR
+    una presencia que solo vio una lectura; acá la presencia la vieron las
+    dos y lo único en duda es la variante. Se conserva la lectura más
+    segura sin el castigo fuerte: la duda de variante ya queda registrada
+    en el acuerdo.
+
+    Solo cuenta como disputa de variante si los dos SKU son de la MISMA
+    MARCA. Que una lectura vea Ducales y la otra Saltín Noel en el mismo
+    lugar no es una duda de sabor: es un desacuerdo de verdad, y ese sí
+    lleva castigo. Sin `marcas` no se puede distinguir un caso del otro,
+    así que no se empareja nada.
+    """
+    disputas: list[tuple[Deteccion, Deteccion]] = []
+    libres_b = list(huerfanas_b)
+    sin_pareja: list[Deteccion] = []
+
+    def misma_marca(x: Deteccion, y: Deteccion) -> bool:
+        marca_x, marca_y = marcas.get(x.sku_codigo), marcas.get(y.sku_codigo)
+        return bool(marca_x) and marca_x == marca_y
+
+    for det_a in huerfanas_a:
+        rival = next(
+            (
+                d for d in libres_b
+                if abs(d.nivel - det_a.nivel) <= MAX_DISTANCIA_NIVEL
+                and _se_solapan(det_a, d)
+                and misma_marca(det_a, d)
+            ),
+            None,
+        )
+        if rival is None:
+            sin_pareja.append(det_a)
+        else:
+            libres_b.remove(rival)
+            disputas.append((det_a, rival))
+
+    return disputas, sin_pareja + libres_b
+
+
+def _emparejar_detecciones(
+    a: list[Deteccion], b: list[Deteccion], marcas: dict[str, str]
+) -> tuple[list[tuple[Deteccion, Deteccion]], list[Deteccion], list[Deteccion]]:
     """Empareja detecciones del mismo SKU entre las dos lecturas.
 
     Dentro de un SKU se emparejan por nivel más cercano: la misma caja de
@@ -105,7 +173,11 @@ def _emparejar_detecciones(
         por_sku_b.setdefault(d.sku_codigo, []).append(d)
 
     parejas: list[tuple[Deteccion, Deteccion]] = []
-    huerfanas: list[Deteccion] = []
+    # Se separan por lectura de origen: dos huérfanas de la MISMA lectura
+    # no pueden ser la misma caja discutida, así que solo se cruzan las de
+    # lecturas distintas.
+    huerfanas_a: list[Deteccion] = []
+    huerfanas_b: list[Deteccion] = []
 
     for codigo in sorted(set(por_sku_a) | set(por_sku_b)):
         lista_a = sorted(por_sku_a.get(codigo, []), key=lambda d: d.nivel)
@@ -122,11 +194,12 @@ def _emparejar_detecciones(
                 libres_b.remove(candidata)
                 parejas.append((det_a, candidata))
             else:
-                huerfanas.append(det_a)
+                huerfanas_a.append(det_a)
 
-        huerfanas.extend(libres_b)
+        huerfanas_b.extend(libres_b)
 
-    return parejas, huerfanas
+    disputas, sueltas = _disputas_de_variante(huerfanas_a, huerfanas_b, marcas)
+    return parejas, disputas, sueltas
 
 
 def _fusionar_pareja(a: Deteccion, b: Deteccion) -> Deteccion:
@@ -269,7 +342,9 @@ def _promedio_del_lineal(a: Observacion, b: Observacion) -> int:
     return round(sum(valores) / len(valores))
 
 
-def fusionar(a: Observacion, b: Observacion) -> tuple[Observacion, Acuerdo]:
+def fusionar(
+    a: Observacion, b: Observacion, marcas: Optional[dict[str, str]] = None
+) -> tuple[Observacion, Acuerdo]:
     """Combina dos lecturas de la misma foto en una sola observación.
 
     La confianza global resultante no es el promedio de las dos: es el
@@ -278,10 +353,21 @@ def fusionar(a: Observacion, b: Observacion) -> tuple[Observacion, Acuerdo]:
     """
     acuerdo = Acuerdo()
 
-    parejas, huerfanas = _emparejar_detecciones(a.detecciones, b.detecciones)
+    parejas, disputas, huerfanas = _emparejar_detecciones(
+        a.detecciones, b.detecciones, marcas or {}
+    )
 
     detecciones = [_fusionar_pareja(x, y) for x, y in parejas]
     acuerdo.skus_en_ambas = sorted({d.sku_codigo for d in detecciones})
+
+    # Presencia confirmada por las dos lecturas, variante en disputa: gana
+    # la más segura, sin el castigo que se reserva para lo que vio una sola.
+    for x, y in disputas:
+        gana, pierde = (x, y) if x.confianza >= y.confianza else (y, x)
+        detecciones.append(gana.model_copy(update={
+            "confianza": round((x.confianza + y.confianza) / 2, 3),
+        }))
+        acuerdo.variantes_en_disputa.append(f"{gana.sku_codigo} vs {pierde.sku_codigo}")
 
     for suelta in huerfanas:
         detecciones.append(suelta.model_copy(update={

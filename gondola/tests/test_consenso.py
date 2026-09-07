@@ -325,3 +325,52 @@ def test_dos_conteos_validos_se_promedian():
     fusion, _ = fusionar(obs(frentes_totales_lineal=80), obs(frentes_totales_lineal=90))
 
     assert fusion.frentes_totales_lineal == 85
+
+
+# =====================================================================
+# Disputa de variante
+# =====================================================================
+
+MARCAS = {
+    "FESTIVAL-FRESA": "Festival", "FESTIVAL-LIMON": "Festival",
+    "DUCALES": "Ducales", "SALTIN": "Noel",
+}
+
+
+def test_dos_variantes_de_la_misma_marca_no_borran_el_producto():
+    """Si una lectura ve Festival Fresa y la otra Festival Limón en la misma
+    bandeja, las dos coincidieron en que ahí hay un Festival. Emparejando
+    por código exacto quedaban huérfanas, se castigaban a 0.57 —bajo el
+    umbral de 0.60— y el producto desaparecía del análisis."""
+    a = obs([det("FESTIVAL-FRESA", confianza=0.95)])
+    b = obs([det("FESTIVAL-LIMON", confianza=0.9)])
+
+    fusion, acuerdo = fusionar(a, b, MARCAS)
+
+    assert len(fusion.detecciones) == 1
+    assert fusion.detecciones[0].sku_codigo == "FESTIVAL-FRESA"  # gana la más segura
+    assert fusion.detecciones[0].confianza == pytest.approx(0.925)
+    assert acuerdo.variantes_en_disputa == ["FESTIVAL-FRESA vs FESTIVAL-LIMON"]
+
+
+def test_dos_marcas_distintas_en_el_mismo_lugar_si_son_desacuerdo():
+    """Ducales contra Saltín Noel no es una duda de sabor: una de las dos
+    lecturas se equivocó de producto, y eso sí lleva castigo."""
+    a = obs([det("DUCALES", confianza=0.95)])
+    b = obs([det("SALTIN", confianza=0.9)])
+
+    fusion, acuerdo = fusionar(a, b, MARCAS)
+
+    assert acuerdo.variantes_en_disputa == []
+    assert all(d.confianza < 0.6 for d in fusion.detecciones)
+
+
+def test_sin_mapa_de_marcas_no_se_empareja_nada():
+    """No se puede distinguir una duda de variante de un desacuerdo real sin
+    saber la marca, así que se mantiene el comportamiento conservador."""
+    a = obs([det("FESTIVAL-FRESA", confianza=0.95)])
+    b = obs([det("FESTIVAL-LIMON", confianza=0.9)])
+
+    _, acuerdo = fusionar(a, b)
+
+    assert acuerdo.variantes_en_disputa == []
