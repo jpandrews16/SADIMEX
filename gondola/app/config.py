@@ -98,6 +98,16 @@ class Settings(BaseSettings):
     app_url: str = "https://sadimex.com"
     app_title: str = "SADIMEX Lector de Gondola"
 
+    # Contar el lineal cortando la foto en bandas, una por bandeja, en vez
+    # de pedirle el total de la góndola entera al modelo. Cuesta N llamadas
+    # cortas en paralelo —unos pocos tokens de salida cada una, y los
+    # tokens de imagen se reparten en vez de duplicarse—, así que en la
+    # práctica agrega segundos, no plata. Ver `conteo.py`.
+    conteo_por_bandas: bool = True
+    # Tope de bandas por foto. Protege de una foto donde el modelo reporte
+    # veinte rieles y dispare veinte llamadas.
+    conteo_bandas_max: int = 10
+
     # ¿El share of shelf puntúa, o solo se informa?
     #
     # Apagado a propósito. Medido contra SKU-110K —fotos de góndola con

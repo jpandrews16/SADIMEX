@@ -35,6 +35,7 @@ from pydantic import ValidationError
 
 from .config import get_settings
 from .consenso import fusionar
+from .conteo import contar_por_bandas
 from .prompt import RESPONSE_FORMAT, construir_mensajes, construir_mensajes_verificacion
 from .riesgo import motivos_para_verificar
 from .schemas import Observacion, Precio, Sku, UsoModelo
@@ -376,6 +377,41 @@ def _filtrar_motivos(motivos: list[str], cfg) -> list[str]:
     return [m for m in motivos if not any(a in m for a in apagados)]
 
 
+def _contar_lineal_por_bandas(
+    foto_data_url: str, obs: Observacion, client: httpx.Client
+) -> Optional[int]:
+    """Rehace el conteo del lineal bandeja por bandeja. None = no medido."""
+    cfg = get_settings()
+    if not cfg.conteo_por_bandas:
+        return None
+    try:
+        total, por_banda = contar_por_bandas(foto_data_url, client)
+    except Exception as exc:
+        # Es una mejora del conteo, no un requisito: si la imagen no se
+        # puede recortar, la foto igual se analiza y el share of shelf
+        # queda sin medir, que es la salida honesta.
+        log.warning("Conteo por bandas no se pudo hacer: %s", exc)
+        return None
+    if total is None:
+        return None
+    log.info("Lineal por bandas: %s = %d (el modelo dijo %d en una pasada)",
+             por_banda, total, obs.frentes_totales_lineal)
+    return total
+
+
+def _con_lineal(obs: Observacion, total: Optional[int]) -> Observacion:
+    """Reemplaza el conteo del lineal por el de las bandas, si se pudo medir.
+
+    Se aplica al final y no antes de la fusión de consenso a propósito: el
+    conteo por bandas no depende de qué lectura ganó, así que no tiene por
+    qué promediarse con nada.
+    """
+    if total is None:
+        return obs
+    propios = sum(d.frentes for d in obs.detecciones)
+    return obs.model_copy(update={"frentes_totales_lineal": max(total, propios)})
+
+
 def analizar_foto(
     skus: Sequence[Sku],
     foto_data_url: str,
@@ -418,6 +454,12 @@ def analizar_foto(
         obs = _normalizar(bruto, codigos)
         modelo_usado, escalado, nota = cfg.modelo_primario, False, None
 
+        # El conteo del lineal se rehace cortando la foto por los rieles y
+        # contando bandeja por bandeja (ver `conteo.py`). Pedirle el total
+        # de la góndola entera al modelo da ~50% de error; cada bandeja por
+        # separado queda bajo el umbral donde el modelo sí cuenta.
+        total_bandas = _contar_lineal_por_bandas(foto_data_url, obs, client)
+
         motivos = _filtrar_motivos(
             motivos_para_verificar(
                 obs, skus, precios,
@@ -427,14 +469,14 @@ def analizar_foto(
             cfg,
         )
         if not motivos:
-            return obs, _uso(modelo_usado, escalado, gasto, nota)
+            return _con_lineal(obs, total_bandas), _uso(modelo_usado, escalado, gasto, nota)
 
         if not cuota_verificacion.permite(cfg.verificacion_max_fraccion_diaria):
             log.warning(
                 "Habría que verificar (%s) pero la cuota diaria está agotada (%s).",
                 "; ".join(motivos), cuota_verificacion.estado(),
             )
-            return obs, _uso(modelo_usado, escalado, gasto, "verificación omitida por cuota")
+            return _con_lineal(obs, total_bandas), _uso(modelo_usado, escalado, gasto, "verificación omitida por cuota")
 
         estrategia = cfg.estrategia_baja_confianza
         log.info("Verificando porque %s → estrategia '%s'", "; ".join(motivos), estrategia)
@@ -494,7 +536,7 @@ def analizar_foto(
                 except VisionError as exc:
                     log.warning("Falló el escalado, se conserva la lectura primaria: %s", exc)
 
-        return obs, _uso(modelo_usado, escalado, gasto, nota)
+        return _con_lineal(obs, total_bandas), _uso(modelo_usado, escalado, gasto, nota)
     finally:
         if propio:
             client.close()

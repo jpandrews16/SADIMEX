@@ -35,11 +35,13 @@ import argparse
 import json
 import statistics
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from gondola.app.config import get_settings  # noqa: E402
+from gondola.app.conteo import contar_por_bandas  # noqa: E402
 from gondola.app.reference_sheet import preparar_foto_gondola  # noqa: E402
 from gondola.app.schemas import Sku  # noqa: E402
 from gondola.app.vision import VisionError, _llamar_con_reintento, _normalizar  # noqa: E402
@@ -137,8 +139,8 @@ def main() -> int:
     import httpx
 
     print(f"\nModelo: {cfg.modelo_primario}")
-    print(f"{'imagen':<16} {'real':>6} {'contado':>8} {'error':>8} {'error %':>8} {'ms':>7} {'det':>4}")
-    print("-" * 66)
+    print(f"{'imagen':<16} {'real':>6} {'1 pasada':>9} {'bandas':>8} {'error':>8} {'error %':>8} {'ms':>7}")
+    print("-" * 70)
 
     filas = []
     with httpx.Client() as client:
@@ -152,17 +154,30 @@ def main() -> int:
                 filas.append({"image_id": image_id, "real": real, "contado": None})
                 continue
 
-            contado = obs.frentes_totales_lineal
+            una_pasada = obs.frentes_totales_lineal
+
+            # El método que de verdad se mide: cortar por los rieles y
+            # contar bandeja por bandeja (ver app/conteo.py).
+            inicio = time.monotonic()
+            por_bandas, detalle_bandas = contar_por_bandas(
+                preparar_foto_gondola(datos), client
+            )
+            ms_bandas = int((time.monotonic() - inicio) * 1000)
+
+            contado = por_bandas if por_bandas is not None else una_pasada
             error = contado - real
             error_pct = 100 * error / real if real else 0
             print(
-                f"{image_id:<16} {real:>6} {contado:>8} {error:>+8} "
-                f"{error_pct:>+7.0f}% {ms:>7} {len(obs.detecciones):>4}"
+                f"{image_id:<16} {real:>6} {una_pasada:>9} "
+                f"{('—' if por_bandas is None else por_bandas):>8} "
+                f"{error:>+8} {error_pct:>+7.0f}% {ms + ms_bandas:>7}"
             )
             filas.append({
                 "image_id": image_id, "real": real, "contado": contado,
+                "una_pasada": una_pasada, "por_bandas": por_bandas,
+                "bandas": detalle_bandas,
                 "error": error, "error_pct": round(error_pct, 1),
-                "confianza": obs.confianza_global, "ms": ms,
+                "confianza": obs.confianza_global, "ms": ms + ms_bandas,
                 # Debería ser 0: el catálogo son marcas que no existen en
                 # estas fotos. Si sale >0, el modelo está inventando SKU.
                 "detecciones": len(obs.detecciones),
@@ -178,7 +193,7 @@ def main() -> int:
     errores = [f["error"] for f in validas]
     errores_pct = [abs(f["error_pct"]) for f in validas]
 
-    print("-" * 66)
+    print("-" * 70)
     print(f"\n{'RESULTADO':<28} {len(validas)}/{len(filas)} imágenes analizadas")
     print(f"{'error absoluto medio':<28} {statistics.mean(abs(e) for e in errores):.1f} productos")
     print(f"{'error relativo medio':<28} {statistics.mean(errores_pct):.0f}%")
