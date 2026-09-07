@@ -177,10 +177,19 @@ def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:
         detecciones.append(d)
     bruto["detecciones"] = detecciones
 
+    # Solo sobreviven las etiquetas de un SKU nuestro. Una etiqueta de la
+    # competencia no la usa ninguna regla —ni la auditoría de precios ni
+    # las señales de riesgo la miran—, así que arrastrarla solo infla el
+    # registro. El costo real de pedirlas se paga antes, en tokens de
+    # salida: medido contra SKU-110K, una foto con 60 etiquetas ajenas
+    # gastó 6.882 tokens y 122 segundos para que el código las tirara.
+    etiquetas = []
     for e in bruto.get("etiquetas") or []:
-        if e.get("sku_asociado") and e["sku_asociado"] not in codigos_validos:
-            e["sku_asociado"] = None
+        if e.get("sku_asociado") not in codigos_validos:
+            continue
         e["nivel"] = max(1, int(e.get("nivel") or 1))
+        etiquetas.append(e)
+    bruto["etiquetas"] = etiquetas
 
     for h in bruto.get("huecos") or []:
         h["nivel"] = max(1, int(h.get("nivel") or 1))

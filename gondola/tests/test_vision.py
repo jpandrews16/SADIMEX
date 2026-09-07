@@ -87,20 +87,31 @@ def test_acota_la_confianza_al_rango_valido():
     assert obs.detecciones[0].confianza == 1.0
 
 
-def test_desasocia_etiqueta_de_un_sku_inexistente():
-    obs = _normalizar(
-        bruto(
-            etiquetas=[{
-                "texto_producto": "PEPSI 2L", "precio_leido": 10.0, "moneda": "BOB",
-                "legible": True, "nivel": 2, "bbox": {"x0": 0, "y0": 0, "x1": 10, "y1": 10},
-                "sku_asociado": "PEPSI-2L", "confianza": 0.8, "es_promocion": False,
-            }]
-        ),
-        CODIGOS,
-    )
-    # La etiqueta se conserva (existe en el riel) pero deja de apuntar a
-    # un SKU nuestro, así que no contamina la auditoría de precios.
-    assert obs.etiquetas[0].sku_asociado is None
+def _etiqueta(sku_asociado, **kw) -> dict:
+    base = {
+        "texto_producto": "PEPSI 2L", "precio_leido": 10.0, "moneda": "BOB",
+        "legible": True, "nivel": 2, "bbox": {"x0": 0, "y0": 0, "x1": 10, "y1": 10},
+        "sku_asociado": sku_asociado, "confianza": 0.8, "es_promocion": False,
+    }
+    base.update(kw)
+    return base
+
+
+def test_descarta_la_etiqueta_de_un_sku_que_no_es_nuestro():
+    """Ninguna regla mira una etiqueta de la competencia, así que guardarla
+    solo ensucia el registro que ve el supervisor."""
+    obs = _normalizar(bruto(etiquetas=[_etiqueta("PEPSI-2L")]), CODIGOS)
+    assert obs.etiquetas == []
+
+
+def test_descarta_la_etiqueta_sin_sku_asociado():
+    obs = _normalizar(bruto(etiquetas=[_etiqueta(None)]), CODIGOS)
+    assert obs.etiquetas == []
+
+
+def test_conserva_la_etiqueta_de_un_sku_nuestro():
+    obs = _normalizar(bruto(etiquetas=[_etiqueta("WILD-FRESA")]), CODIGOS)
+    assert [e.sku_asociado for e in obs.etiquetas] == ["WILD-FRESA"]
 
 
 def test_niveles_visibles_nunca_es_cero():

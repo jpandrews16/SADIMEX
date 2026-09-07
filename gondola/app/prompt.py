@@ -25,7 +25,7 @@ Reglas que no puedes romper:
 4. AGRUPA. Un item de `detecciones` representa un GRUPO de unidades del mismo SKU juntas en la misma bandeja, no una unidad suelta. Si ves 5 paquetes iguales en fila, eso es UNA detección con `frentes: 5`, nunca cinco detecciones de un frente. Solo abres una segunda detección del mismo SKU si está en otra bandeja o separado por otro producto.
 5. "Frentes" (facings) es cuántas unidades se ven de frente en esa fila horizontal. No cuentes las de atrás en profundidad.
 6. `x0` y `x1` son el borde izquierdo y derecho del grupo, normalizados de 0 a 1000 sobre el ancho de la imagen.
-7. Para cada etiqueta de precio del riel, asocia `sku_asociado` al producto que está JUSTO ENCIMA de ella. Si no hay producto encima o no lo reconoces, deja `sku_asociado` en null.
+7. Reporta en `etiquetas` SOLO las que correspondan a un SKU del CATÁLOGO, y pon su código en `sku_asociado`. Son dos casos: la etiqueta está justo debajo de un producto del catálogo, o el texto impreso en la etiqueta nombra un producto del catálogo aunque encima haya un hueco (eso delata un quiebre). Las etiquetas de la competencia NO se reportan: un riel tiene decenas y ninguna sirve acá. Nunca devuelvas una etiqueta con `sku_asociado` en null.
 8. Lee los precios tal como aparecen impresos. Si el número está borroso o cortado, marca `legible: false` y deja `precio_leido` en null. Nunca adivines un precio.
 9. Responde SIEMPRE en el formato JSON pedido, sin texto adicional ni markdown."""
 
