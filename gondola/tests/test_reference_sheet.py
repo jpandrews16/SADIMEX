@@ -57,3 +57,20 @@ def test_sin_packshots_no_hay_hoja_de_referencia():
             categoria="galletas", packshot_url=None),
     ]
     assert construir_hoja_referencia(skus) is None
+
+
+def test_un_packshot_local_tambien_sirve(tmp_path):
+    """Permite probar el catálogo recién sacado del PDF sin haber montado
+    Storage: si hubiera que subir 347 imágenes solo para ver si el mosaico
+    mejora el acierto, esa medición no se haría nunca."""
+    from PIL import Image
+
+    from gondola.app.reference_sheet import _descargar
+
+    ruta = tmp_path / "packshot.png"
+    Image.new("RGB", (400, 400), (10, 20, 30)).save(ruta)
+
+    img = _descargar(None, str(ruta), 100)
+
+    assert img is not None
+    assert max(img.size) == 100

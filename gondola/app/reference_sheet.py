@@ -53,6 +53,15 @@ def _fuente(tam: int = 15) -> ImageFont.ImageFont:
 
 def _descargar(client: httpx.Client, url: str, lado: int) -> Optional[Image.Image]:
     try:
+        # Un packshot también puede ser un archivo local. Sirve para probar
+        # el catálogo recién extraído del PDF, antes de tener dónde subirlo:
+        # sin esto habría que montar Storage solo para ver si el mosaico
+        # mejora el acierto.
+        if not url.startswith(("http://", "https://")):
+            img = Image.open(url).convert("RGB")
+            img.thumbnail((lado, lado), Image.LANCZOS)
+            return img
+
         resp = client.get(url, timeout=20.0)
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content))
