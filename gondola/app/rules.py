@@ -226,17 +226,18 @@ def evaluar_frentes(
     # lineal no sea confiable.
     #
     # Medido contra SKU-110K —11.762 fotos de góndola con 1,73 millones de
-    # productos marcados a mano—, el conteo total del lineal se equivoca en
-    # torno al 50%, y en fotos de pasillo en diagonal directamente falla.
+    # productos marcados a mano—, el conteo del lineal por bandejas queda
+    # en 10,5% de error mediano y sin sesgo. Eso alcanza para una
+    # tendencia, no para una foto suelta: el error de una foto puntual se
+    # va al 20%, y de una foto puntual cuelga el bono de un reponedor.
+    #
     # El numerador (nuestros frentes) es fácil: son pocas unidades de
     # productos que el modelo tiene en la hoja de referencia. El
-    # denominador es contar cien envases ajenos, que es lo que un modelo de
-    # visión hace peor.
+    # denominador es contar cien envases ajenos, que es lo que peor hace.
     #
-    # Un reponedor no puede perder el bono por un denominador con 50% de
-    # error, así que el share entra al informe como dato y se queda fuera
-    # de la nota hasta que se mida bien sobre fotos de nuestras salas.
-    # Súbelo con SHARE_OF_SHELF_PUNTUA=true recién cuando eso esté hecho.
+    # Así que el share entra al informe como dato y se queda fuera de la
+    # nota hasta medirlo sobre fotos de nuestras salas. Se activa con
+    # SHARE_OF_SHELF_PUNTUA=true.
     share_puntua = get_settings().share_of_shelf_puntua
     if share_puntua and share_exigido is not None and share is not None:
         puntajes.append(min(1.0, share / share_exigido) if share_exigido > 0 else 1.0)

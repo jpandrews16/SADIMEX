@@ -110,17 +110,19 @@ class Settings(BaseSettings):
 
     # ¿El share of shelf puntúa, o solo se informa?
     #
-    # Apagado a propósito. Medido contra SKU-110K —fotos de góndola con
-    # 1,73 millones de productos marcados a mano—, el conteo total del
-    # lineal se equivoca alrededor de un 50%: el modelo cuenta bien
-    # nuestros pocos frentes, pero contar cien envases ajenos es lo que
-    # peor hace. Ese conteo es el DENOMINADOR del share, así que el share
-    # hereda el error entero.
+    # Apagado a propósito, pero por un margen más fino que antes. Medido
+    # contra SKU-110K —fotos de góndola con 1,73 millones de productos
+    # marcados a mano—, el conteo del lineal quedó en 18% de error medio y
+    # 10,5% de mediana con el conteo por bandejas de `conteo.py`, contra el
+    # ~50% de pedirle el total al modelo de una pasada.
     #
-    # Con ese margen, un reponedor podría perder el bono por un número mal
-    # contado. El share sale igual en el informe, marcado como referencial,
-    # y la regla de frentes puntúa solo contra los mínimos por SKU, que se
-    # miden sobre nuestros propios productos y sí son confiables.
+    # La distinción que importa: el sesgo es de -1,8 productos, o sea que
+    # los errores se cancelan al promediar. **Agregado** —el share de una
+    # sala en el mes, la tendencia de una cadena— el número ya sirve. Pero
+    # una foto suelta puede irse 20%, y de una foto suelta cuelga el bono
+    # de un reponedor. Por eso el share sale en el informe marcado como
+    # referencial y la nota se calcula solo con los mínimos de frentes por
+    # SKU, que se miden sobre nuestros propios productos.
     #
     # Enciéndelo cuando el conteo esté medido sobre fotos de nuestras salas
     # anotadas a mano, no antes.
