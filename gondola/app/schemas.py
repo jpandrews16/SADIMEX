@@ -134,6 +134,11 @@ class Observacion(BaseModel):
     mueble_completo_visible: bool = True
     calidad_foto: CalidadFoto = "buena"
     motivo_calidad: Optional[str] = None
+    # Un entero por bandeja, de abajo hacia arriba. Se le pide al modelo
+    # desglosado en vez de como un total: al obligarlo a recorrer bandeja
+    # por bandeja cuenta de verdad, y si le pides directo el total tiende a
+    # contestar 0 o un número redondo sin haber mirado.
+    frentes_por_nivel: list[int] = Field(default_factory=list)
     frentes_totales_lineal: int = Field(
         default=0, ge=0, description="Frentes de TODAS las marcas en la sección fotografiada"
     )

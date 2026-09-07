@@ -299,3 +299,29 @@ def test_el_consenso_evita_acusar_de_precio_incorrecto_con_una_mala_lectura():
     criticos = [h for h in evaluacion.hallazgos if h.severidad == "critico"]
     assert not any("desvío" in h.mensaje for h in criticos)
     assert any("ilegible" in h.mensaje for h in evaluacion.hallazgos)
+
+
+# =====================================================================
+# Conteo del lineal
+# =====================================================================
+
+
+def test_una_lectura_que_no_conto_el_lineal_no_arrastra_a_la_otra():
+    """Un 0 es "esta lectura no contó", no "la góndola está vacía".
+    Promediarlo partiría el denominador del share of shelf a la mitad, y
+    la sala aparecería con el doble de espacio del que tiene."""
+    fusion, _ = fusionar(obs(frentes_totales_lineal=80), obs(frentes_totales_lineal=0))
+
+    assert fusion.frentes_totales_lineal == 80
+
+
+def test_si_ninguna_lectura_conto_el_lineal_queda_sin_medir():
+    fusion, _ = fusionar(obs(frentes_totales_lineal=0), obs(frentes_totales_lineal=0))
+
+    assert fusion.frentes_totales_lineal == 0
+
+
+def test_dos_conteos_validos_se_promedian():
+    fusion, _ = fusionar(obs(frentes_totales_lineal=80), obs(frentes_totales_lineal=90))
+
+    assert fusion.frentes_totales_lineal == 85

@@ -199,13 +199,20 @@ def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:
 
     bruto["niveles_visibles"] = max(1, int(bruto.get("niveles_visibles") or 1))
 
-    # El total del lineal no puede ser menor que lo nuestro: sería un share
-    # of shelf mayor a 100%. El modelo lo devuelve mal cada tanto —tiende a
-    # leer "frentes totales" como "frentes míos"—, así que se pisa con el
-    # piso que sí es cierto. Un 0 se deja en 0 a propósito: es la señal de
-    # "no se pudo contar el lineal" y `rules.py` saca el share del promedio
-    # en vez de inventar un denominador.
-    total = max(0, int(bruto.get("frentes_totales_lineal") or 0))
+    # El total del lineal lo suma el código, no el modelo. Se le pide el
+    # desglose bandeja por bandeja porque preguntarle el total de una vez
+    # no funciona: medido contra SKU-110K, respondía 0 en 8 de 12 fotos
+    # que tenían más de cien productos, o soltaba un número redondo
+    # repetido. Obligarlo a recorrer bandeja por bandeja es lo que lo hace
+    # contar de verdad, y la suma es aritmética: no hay por qué delegarla.
+    por_nivel = [max(0, int(n or 0)) for n in (bruto.get("frentes_por_nivel") or [])]
+    bruto["frentes_por_nivel"] = por_nivel
+    total = sum(por_nivel) or max(0, int(bruto.get("frentes_totales_lineal") or 0))
+
+    # El total no puede quedar por debajo de lo nuestro: sería un share of
+    # shelf mayor a 100%. Un 0 se deja en 0 a propósito: es la señal de "no
+    # se pudo contar el lineal" y `rules.py` saca el share del promedio en
+    # vez de inventar un denominador.
     propios = sum(d["frentes"] for d in detecciones)
     if 0 < total < propios:
         log.info(

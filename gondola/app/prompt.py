@@ -19,7 +19,7 @@ Tu única función es DESCRIBIR con precisión lo que aparece en una foto de gó
 
 Reglas que no puedes romper:
 1. Solo reportas SKU que estén en el CATÁLOGO que se te entrega. Si ves un producto de otra marca, NO lo reportes como detección: solo cuéntalo dentro de `frentes_totales_lineal`.
-1b. `frentes_totales_lineal` NO depende del catálogo. Es cuántos envases se ven de frente en TODA la sección fotografiada, sumando todas las marcas: las tuyas, las de la competencia y las que no reconoces. Si en la foto hay productos, este número es mayor que cero AUNQUE no encuentres ningún SKU del catálogo. Cuéntalo bandeja por bandeja y suma. Solo puede ser 0 si la góndola está literalmente vacía.
+1b. `frentes_por_nivel` NO depende del catálogo. Es un entero por cada bandeja visible, empezando por la de abajo: cuántos envases se ven de frente en ESA bandeja, sumando todas las marcas —las tuyas, las de la competencia y las que no reconoces—. Recorre cada bandeja de izquierda a derecha y cuenta antes de escribir el número; no lo estimes ni lo redondees. La lista tiene exactamente tantos números como `niveles_visibles`, y un número solo puede ser 0 si esa bandeja está vacía. Es lo primero que tienes que hacer, aunque no encuentres ningún SKU del catálogo en toda la foto.
 2. Si no estás seguro de cuál variante exacta es, reporta el SKU más probable con una confianza BAJA (por ejemplo 0.45). Nunca inventes un código que no esté en el catálogo.
 3. Los niveles se cuentan desde ABAJO: nivel 1 = la bandeja más cercana al piso.
 4. AGRUPA. Un item de `detecciones` representa un GRUPO de unidades del mismo SKU juntas en la misma bandeja, no una unidad suelta. Si ves 5 paquetes iguales en fila, eso es UNA detección con `frentes: 5`, nunca cinco detecciones de un frente. Solo abres una segunda detección del mismo SKU si está en otra bandeja o separado por otro producto.
@@ -96,10 +96,11 @@ def construir_mensajes(
                 "- nivel_ojos: qué bandeja queda a la altura de los ojos de un adulto "
                 "de pie frente al mueble (típicamente la penúltima de arriba hacia abajo).\n"
                 "- mueble_completo_visible: false si la foto corta el mueble por arriba o por abajo.\n"
-                "- frentes_totales_lineal: cuenta bandeja por bandeja TODOS los envases "
-                "que se ven de frente, de cualquier marca —las del catálogo, la "
-                "competencia y las que no reconozcas— y suma. Es el denominador del "
-                "share of shelf, así que no puede ser 0 si hay producto en la foto.\n"
+                "- frentes_por_nivel: un número por bandeja, de abajo hacia arriba, con "
+                "TODOS los envases que se ven de frente en ella, de cualquier marca "
+                "—las del catálogo, la competencia y las que no reconozcas—. De acá "
+                "sale el denominador del share of shelf: si lo dejas vacío o en ceros, "
+                "la foto no sirve.\n"
                 "- detecciones: un item por cada GRUPO de unidades del mismo SKU en una bandeja.\n"
                 "- huecos: espacios vacíos en las bandejas.\n"
                 "- etiquetas: cada etiqueta de precio del riel.\n"
@@ -165,6 +166,13 @@ def construir_mensajes_verificacion(
 #    planos, 1 de cada 3. El decodificador restringido del proveedor
 #    tropieza con la estructura anidada.
 #
+# 3. **El conteo del lineal va desglosado por bandeja, y el total lo suma
+#    Python.** Preguntarle el total directo no funciona: medido contra
+#    SKU-110K, devolvía 0 en 8 de 12 fotos con más de cien productos, o
+#    repetía un número redondo. Pedir un entero por bandeja lo obliga a
+#    recorrer el mueble para poder contestar, cuesta media docena de
+#    tokens más, y deja la suma donde es auditable.
+#
 # Si mañana una regla nueva necesita otro campo, se agrega aquí —pero
 # midiendo antes y después, porque el costo no es solo de tokens.
 
@@ -176,7 +184,11 @@ OBSERVACION_SCHEMA = {
         "mueble_completo_visible": {"type": "boolean"},
         "calidad_foto": {"type": "string", "enum": ["buena", "regular", "mala"]},
         "motivo_calidad": {"type": ["string", "null"]},
-        "frentes_totales_lineal": {"type": "integer"},
+        "frentes_por_nivel": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Un entero por bandeja, de abajo hacia arriba",
+        },
         "detecciones": {
             "type": "array",
             "items": {
@@ -231,7 +243,7 @@ OBSERVACION_SCHEMA = {
     },
     "required": [
         "niveles_visibles", "nivel_ojos", "mueble_completo_visible", "calidad_foto",
-        "motivo_calidad", "frentes_totales_lineal", "detecciones", "huecos",
+        "motivo_calidad", "frentes_por_nivel", "detecciones", "huecos",
         "etiquetas", "confianza_global",
     ],
     "additionalProperties": False,

@@ -119,6 +119,23 @@ def test_niveles_visibles_nunca_es_cero():
     assert obs.niveles_visibles == 1
 
 
+def test_el_total_del_lineal_lo_suma_el_codigo():
+    """Al modelo se le pide el desglose por bandeja, no el total: pedirle
+    el total directo le sale 0 o un número redondo. La suma es aritmética
+    y se hace acá, donde es auditable."""
+    obs = _normalizar(bruto(frentes_por_nivel=[12, 9, 14, 8]), CODIGOS)
+    assert obs.frentes_totales_lineal == 43
+
+
+def test_un_desglose_vacio_cae_al_total_que_haya_mandado_el_modelo():
+    """Compatibilidad: si el modelo responde con el esquema viejo, la foto
+    no se pierde."""
+    obs = _normalizar(
+        bruto(frentes_por_nivel=[], frentes_totales_lineal=55), CODIGOS
+    )
+    assert obs.frentes_totales_lineal == 55
+
+
 def test_el_lineal_nunca_es_menor_que_los_frentes_propios():
     """Si el total del lineal fuera menor que lo nuestro, el share of shelf
     saldría arriba de 100% y la sala aparecería mejor de lo que está."""

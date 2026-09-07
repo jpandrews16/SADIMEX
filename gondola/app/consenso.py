@@ -256,6 +256,19 @@ def _fusionar_huecos(a: list[Hueco], b: list[Hueco], acuerdo: Acuerdo) -> list[H
 # =====================================================================
 
 
+def _promedio_del_lineal(a: Observacion, b: Observacion) -> int:
+    """Promedia el conteo del lineal ignorando la lectura que no contó.
+
+    Un 0 no es "la góndola está vacía": es que esa lectura no llegó a
+    contar. Meterlo al promedio parte el denominador del share of shelf a
+    la mitad, y el share sale al doble de lo real.
+    """
+    valores = [v for v in (a.frentes_totales_lineal, b.frentes_totales_lineal) if v > 0]
+    if not valores:
+        return 0
+    return round(sum(valores) / len(valores))
+
+
 def fusionar(a: Observacion, b: Observacion) -> tuple[Observacion, Acuerdo]:
     """Combina dos lecturas de la misma foto en una sola observación.
 
@@ -300,7 +313,13 @@ def fusionar(a: Observacion, b: Observacion) -> tuple[Observacion, Acuerdo]:
         mueble_completo_visible=a.mueble_completo_visible and b.mueble_completo_visible,
         calidad_foto=peor_calidad,
         motivo_calidad=a.motivo_calidad or b.motivo_calidad,
-        frentes_totales_lineal=round((a.frentes_totales_lineal + b.frentes_totales_lineal) / 2),
+        # 0 significa "esta lectura no contó el lineal", no "el lineal está
+        # vacío". Promediarlo con una lectura buena partiría el denominador
+        # del share of shelf a la mitad e inflaría el share al doble.
+        frentes_totales_lineal=_promedio_del_lineal(a, b),
+        frentes_por_nivel=(
+            a.frentes_por_nivel if a.frentes_totales_lineal else b.frentes_por_nivel
+        ),
         detecciones=detecciones,
         huecos=huecos,
         etiquetas=etiquetas,
