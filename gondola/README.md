@@ -65,10 +65,38 @@ El flujo es 100% automático. Tres mecanismos sostienen el acierto:
    lo que distingue "Wild Protein Fresa" de "Wild Protein Vainilla" cuando
    solo cambia el color de la banda.
 
-2. **Escalado automático de modelo.** Toda foto pasa por el modelo barato.
-   Solo si el propio modelo reporta baja confianza (o la foto salió mala)
-   se reintenta con el modelo grande. El costo promedio queda cerca del
-   barato y el acierto cerca del caro.
+2. **Consenso de dos lecturas baratas.** Toda foto pasa una vez por el
+   modelo barato. Si esa lectura no es confiable, se pide una **segunda al
+   mismo modelo barato** con un método de conteo distinto (recorrido
+   bandeja por bandeja, de abajo hacia arriba) y se fusionan las dos.
+   Solo si se contradicen de verdad se paga el modelo grande.
+
+   Esto es mejor *y* más barato que escalar directo:
+   - Dos llamadas al chico cuestan menos que una al grande, sobre todo en
+     tokens de salida (0.416 vs 1.90 por millón en Qwen3-VL 32B vs 235B).
+   - El acuerdo entre dos lecturas independientes es mejor evidencia que
+     la autoevaluación del modelo: un modelo puede estar seguro y
+     equivocado, pero es raro que se equivoque igual dos veces con
+     métodos distintos.
+   - Donde no coinciden, sabemos exactamente qué **no** creer.
+
+   La fusión (`consenso.py`) es conservadora donde el error es caro:
+
+   | Situación | Qué hace | Por qué |
+   |-----------|----------|---------|
+   | SKU visto por una sola lectura | Confianza × 0.6 → deja de contar | No afirmar que un producto está |
+   | Frentes distintos (4 vs 6) | Promedia | Contar unidades en fila es lo que peor hace un LLM |
+   | Hueco visto por una sola | Se descarta | Un falso quiebre manda a un supervisor a una sala sin problema |
+   | Precios distintos en la misma etiqueta | Descarta el precio, marca "ilegible" | Acusar a una sala de tener el precio mal por un dígito mal leído es el error más caro posible |
+   | Una dice que el mueble sale cortado | No se evalúa la altura | No castigar por lo que la foto no dejaba ver |
+
+   La confianza final no es el promedio: es el promedio **corregido por
+   cuánto coincidieron**. Dos lecturas seguras que se contradicen dan
+   confianza baja, que es lo correcto.
+
+   Se controla con `ESTRATEGIA_BAJA_CONFIANZA` (`consenso` por defecto,
+   `escalado` o `ninguna`), y `gondola_efecto_consenso` muestra cuántas
+   fotos necesitan verificarse y qué cuesta eso.
 
 3. **Saneamiento estricto.** Un SKU que no está en el catálogo se descarta
    antes de llegar al motor de reglas. El modelo no puede inventar
@@ -108,7 +136,8 @@ gondola/
 │   ├── catalog.py          Catálogo + resolución de reglas y precios por jerarquía
 │   ├── reference_sheet.py  Mosaico de packshots + normalizado de la foto
 │   ├── prompt.py           Prompt de observación + JSON schema estricto
-│   ├── vision.py           Cliente OpenRouter con escalado de modelo
+│   ├── vision.py           Cliente OpenRouter: 1 lectura, o 2 en consenso
+│   ├── consenso.py         ★ Fusión conservadora de dos lecturas
 │   ├── rules.py            ★ Motor determinístico de las 6 reglas
 │   ├── pipeline.py         Orquestación foto → análisis persistido
 │   ├── worker.py           Consumidor de la cola
@@ -116,9 +145,10 @@ gondola/
 │   ├── admin.py            Carga de catálogo y precios por cadena (CSV)
 │   └── main.py             API FastAPI
 ├── tools/
-│   ├── comparar_modelos.py     Compara modelos sobre TUS fotos con métricas reales
-│   └── importar_catalogo_canva.py  PDF de Canva → packshots + catálogo CSV
-├── tests/                  109 tests: reglas, evidencia, costos, CSV, saneamiento
+│   ├── comparar_modelos.py         Compara modelos sobre TUS fotos con métricas reales
+│   ├── importar_catalogo_canva.py  PDF de Canva → packshots + catálogo CSV
+│   └── normalizar_marcas.py        Unifica marcas escritas de varias formas
+├── tests/                  165 tests: reglas, consenso, evidencia, costos, CSV
 ├── catalogo.ejemplo.json   Catálogo de arranque
 ├── Dockerfile
 ├── railway.json            Servicio API
@@ -131,12 +161,13 @@ gondola/
 
 ### 1. Migración
 
-Aplica `migrations/003_gondola_schema.sql` en Supabase. Crea las tablas,
-las políticas RLS por ciudad, las vistas de ranking y el RPC
-`gondola_reclamar_foto` (con `SKIP LOCKED`, así se pueden correr varios
-workers en paralelo sin que dos tomen la misma foto).
+Aplica en Supabase, en este orden:
 
-También agrega el rol `reponedor` a `sadimex_profiles`.
+| Archivo | Qué crea |
+|---------|----------|
+| `003_gondola_schema.sql` | Tablas, RLS por ciudad, vistas de ranking, rol `reponedor` y el RPC `gondola_reclamar_foto` (con `SKIP LOCKED`, así corren varios workers sin que dos tomen la misma foto) |
+| `004_gondola_cadenas_precios.sql` | Cadenas (Fidalga, Hipermaxi, Tía, IC Norte), carga de precios con historial y vistas de cobertura y costo |
+| `005_gondola_consenso.sql` | Trazabilidad del consenso: cuántas lecturas por foto y qué pasó al fusionarlas |
 
 ### 2. Storage
 
@@ -419,7 +450,7 @@ Vistas SQL creadas por las migraciones:
 python -m pytest gondola/tests -q
 ```
 
-109 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
+165 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
 los casos que protegen al reponedor: sin PVP cargado no se penaliza, sin
 mueble completo no se evalúa la altura), la jerarquía de resolución de
 reglas y precios, el saneamiento de la respuesta del modelo, la validación

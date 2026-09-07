@@ -157,6 +157,8 @@ def guardar_analisis(analisis: Analisis, etiquetas_detalle: list[dict]) -> dict:
         "tokens_salida": uso.tokens_salida,
         "costo_usd": uso.costo_usd,
         "duracion_ms": uso.duracion_ms,
+        "lecturas": uso.lecturas,
+        "nota_consenso": uso.nota_consenso,
     }
     # upsert por photo_id: reprocesar una foto reemplaza su análisis en
     # vez de duplicarlo.

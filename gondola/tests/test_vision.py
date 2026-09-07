@@ -152,3 +152,165 @@ def test_sin_packshots_no_se_manda_hoja_de_referencia(skus):
 def test_el_esquema_exige_todos_los_campos_de_observacion():
     # `strict: true` en OpenRouter falla si un required no está en properties.
     assert set(OBSERVACION_SCHEMA["required"]) == set(OBSERVACION_SCHEMA["properties"])
+
+
+# =====================================================================
+# Estrategia ante una lectura dudosa
+# =====================================================================
+
+
+@pytest.fixture
+def registrar_llamadas(monkeypatch):
+    """Reemplaza la llamada real y anota (modelo, temperatura) de cada una."""
+    from gondola.app import vision
+
+    llamadas: list[tuple[str, float]] = []
+    respuestas: list[dict] = []
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        llamadas.append((modelo, temperatura))
+        i = min(len(llamadas) - 1, len(respuestas) - 1)
+        return respuestas[i], {"prompt_tokens": 100, "completion_tokens": 50, "cost": 0.0001}, 500
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+    monkeypatch.setattr(vision.cuota_escalado, "_dia", None)
+    return llamadas, respuestas
+
+
+@pytest.fixture
+def skus_min():
+    return [Sku(id="s1", codigo="NOEL-A", nombre="A", marca="Noel", categoria="cafe")]
+
+
+def _respuesta(confianza, skus=("NOEL-A",)):
+    return bruto(
+        confianza_global=confianza,
+        detecciones=[deteccion(s) for s in skus],
+    )
+
+
+def test_una_lectura_confiable_no_gasta_una_segunda_llamada(registrar_llamadas, skus_min, monkeypatch):
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    llamadas, respuestas = registrar_llamadas
+    respuestas.append(_respuesta(0.95))
+
+    _obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 1
+    assert uso.lecturas == 1
+    assert uso.nota_consenso is None
+
+
+def test_una_lectura_dudosa_dispara_una_segunda_al_mismo_modelo_barato(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    """El punto de la estrategia: verificar sale más barato que escalar."""
+    from gondola.app import vision
+
+    cfg = vision.get_settings()
+    monkeypatch.setattr(cfg, "openrouter_api_key", "test", raising=False)
+    llamadas, respuestas = registrar_llamadas
+    respuestas.extend([_respuesta(0.5), _respuesta(0.5)])
+
+    _obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 2
+    # Las dos con el modelo barato, no con el grande.
+    assert llamadas[0][0] == llamadas[1][0] == cfg.modelo_primario
+    assert uso.escalado is False
+    assert uso.lecturas == 2
+    assert "acuerdo" in (uso.nota_consenso or "")
+
+
+def test_la_segunda_lectura_usa_temperatura_para_no_ser_un_eco(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    from gondola.app import vision
+
+    cfg = vision.get_settings()
+    monkeypatch.setattr(cfg, "openrouter_api_key", "test", raising=False)
+    llamadas, respuestas = registrar_llamadas
+    respuestas.extend([_respuesta(0.5), _respuesta(0.5)])
+
+    vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert llamadas[0][1] == 0.0
+    assert llamadas[1][1] == cfg.temperatura_verificacion
+
+
+def test_dos_lecturas_que_se_contradicen_escalan_al_modelo_grande(
+    registrar_llamadas, monkeypatch
+):
+    from gondola.app import vision
+
+    cfg = vision.get_settings()
+    monkeypatch.setattr(cfg, "openrouter_api_key", "test", raising=False)
+    skus = [
+        Sku(id="s1", codigo="NOEL-A", nombre="A", marca="Noel", categoria="cafe"),
+        Sku(id="s2", codigo="WILD-FRESA", nombre="B", marca="Wild", categoria="cafe"),
+    ]
+    llamadas, respuestas = registrar_llamadas
+    respuestas.extend([
+        _respuesta(0.5, ("NOEL-A",)),
+        _respuesta(0.5, ("WILD-FRESA",)),   # no coinciden en nada
+        _respuesta(0.9, ("NOEL-A",)),
+    ])
+
+    _obs, uso = vision.analizar_foto(skus, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 3
+    assert llamadas[2][0] == cfg.modelo_escalado
+    assert uso.escalado is True
+    assert uso.lecturas == 3
+
+
+def test_el_costo_de_todas_las_lecturas_se_suma(registrar_llamadas, skus_min, monkeypatch):
+    """Verificar no es gratis y tiene que verse en el reporte de gasto."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    _llamadas, respuestas = registrar_llamadas
+    respuestas.extend([_respuesta(0.5), _respuesta(0.5)])
+
+    _obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert uso.costo_usd == pytest.approx(0.0002)
+    assert uso.tokens_entrada == 200
+    assert uso.duracion_ms == 1000
+
+
+def test_si_la_verificacion_falla_se_conserva_la_primera_lectura(skus_min, monkeypatch):
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    intentos = {"n": 0}
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        intentos["n"] += 1
+        if intentos["n"] == 1:
+            return _respuesta(0.5), {"cost": 0.0001}, 100
+        raise vision.VisionError("timeout de OpenRouter")
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+
+    obs_final, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert obs_final.confianza_global == 0.5
+    assert uso.nota_consenso == "verificación fallida"
+
+
+def test_la_estrategia_ninguna_se_queda_con_la_primera_lectura(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    monkeypatch.setattr(vision.get_settings(), "estrategia_baja_confianza", "ninguna", raising=False)
+    llamadas, respuestas = registrar_llamadas
+    respuestas.append(_respuesta(0.3))
+
+    vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 1

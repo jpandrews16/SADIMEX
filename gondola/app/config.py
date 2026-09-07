@@ -30,10 +30,29 @@ class Settings(BaseSettings):
     modelo_primario: str = "qwen/qwen3-vl-32b-instruct"
     # Modelo de escalado: solo cuando el primario reporta baja confianza.
     modelo_escalado: str = "qwen/qwen3-vl-235b-a22b-instruct"
-    # Por debajo de esta confianza global se reintenta con el modelo de escalado.
-    # Con volumen alto este número es la perilla del gasto: subirlo escala
+    # Qué hacer cuando la primera lectura no es confiable:
+    #   consenso — segunda lectura con el MISMO modelo barato y enfoque
+    #              distinto, y se fusionan. Dos llamadas al chico cuestan
+    #              menos que una al grande, y el acuerdo entre lecturas
+    #              independientes es mejor señal que la autoevaluación del
+    #              modelo. Es el default.
+    #   escalado — reintenta con el modelo grande (más caro).
+    #   ninguna  — se queda con la primera lectura.
+    estrategia_baja_confianza: str = "consenso"
+
+    # Por debajo de esta confianza global se aplica la estrategia anterior.
+    # Con volumen alto este número es la perilla del gasto: subirlo verifica
     # más fotos y cuesta más; bajarlo abarata y deja pasar más error.
     umbral_escalado: float = 0.75
+
+    # La segunda lectura necesita algo de temperatura: con 0 devolvería la
+    # misma respuesta y el acuerdo no probaría nada.
+    temperatura_verificacion: float = 0.4
+
+    # Si tras el consenso las dos lecturas siguen en desacuerdo por debajo
+    # de este índice, se escala al modelo grande como último recurso
+    # (sujeto a la cuota diaria). 0 desactiva ese tercer intento.
+    umbral_acuerdo_para_escalar: float = 0.50
     # Detecciones por debajo de esta confianza no cuentan como producto presente.
     umbral_deteccion: float = 0.60
     # Tope de fotos que pueden escalar al modelo grande, como fracción del

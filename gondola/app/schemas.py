@@ -191,6 +191,12 @@ class UsoModelo(BaseModel):
     tokens_salida: int = 0
     costo_usd: float = 0.0
     duracion_ms: int = 0
+    # Cuántas veces se leyó la foto. 1 = lectura confiable de una pasada;
+    # 2 = hubo que verificar; 3 = las dos lecturas se contradijeron.
+    lecturas: int = 1
+    # Qué pasó al fusionar dos lecturas: cuánto coincidieron, qué precios
+    # se descartaron. Es lo que permite auditar un score dudoso después.
+    nota_consenso: Optional[str] = None
 
 
 class Analisis(BaseModel):

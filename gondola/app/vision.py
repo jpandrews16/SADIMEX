@@ -1,13 +1,25 @@
 """Cliente de visión sobre OpenRouter.
 
-Estrategia de dos niveles, pensada para volumen alto:
+Estrategia por defecto (`consenso`), pensada para volumen alto:
 
-  1. Toda foto pasa por el modelo primario (barato).
-  2. Solo si el propio modelo reporta baja confianza —o la foto salió
-     mala— se reintenta con el modelo de escalado.
+  1. Toda foto pasa una vez por el modelo primario (barato).
+  2. Si esa lectura no es confiable, se pide una **segunda lectura al
+     mismo modelo barato**, con un método de conteo distinto, y se
+     fusionan (ver `consenso.py`).
+  3. Solo si las dos lecturas se contradicen de verdad se paga el modelo
+     grande, sujeto a la cuota diaria.
 
-Así el costo promedio queda cerca del modelo barato y la precisión cerca
-del caro, sin meter a una persona en el circuito.
+Por qué así y no escalando directo al modelo grande:
+
+  * Sale más barato. Dos llamadas al modelo chico cuestan menos que una
+    al grande, sobre todo en tokens de salida (0.416 vs 1.90 por millón
+    en Qwen3-VL 32B contra 235B).
+  * El acuerdo entre dos lecturas independientes es mejor evidencia que
+    la autoevaluación del modelo: un modelo puede estar seguro y
+    equivocado, pero es raro que se equivoque igual dos veces con
+    métodos distintos.
+  * Donde no coinciden, sabemos exactamente qué no hay que creer. Eso es
+    lo que ninguna lectura única puede darte.
 """
 
 from __future__ import annotations
@@ -22,7 +34,8 @@ import httpx
 from pydantic import ValidationError
 
 from .config import get_settings
-from .prompt import RESPONSE_FORMAT, construir_mensajes
+from .consenso import fusionar
+from .prompt import RESPONSE_FORMAT, construir_mensajes, construir_mensajes_verificacion
 from .schemas import Observacion, Sku, UsoModelo
 
 log = logging.getLogger(__name__)
@@ -152,15 +165,16 @@ def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:
 
 
 def _llamar_modelo(
-    client: httpx.Client, modelo: str, mensajes: list[dict]
+    client: httpx.Client, modelo: str, mensajes: list[dict], temperatura: float = 0.0
 ) -> tuple[dict, dict, int]:
     cfg = get_settings()
     payload = {
         "model": modelo,
         "messages": mensajes,
         "response_format": RESPONSE_FORMAT,
-        # Determinismo: la misma foto debe dar la misma lectura.
-        "temperature": 0.0,
+        # La primera lectura va con 0: la misma foto debe dar el mismo
+        # resultado. La de verificación sube la temperatura a propósito.
+        "temperature": temperatura,
         # Pide a OpenRouter el costo real de la llamada.
         "usage": {"include": True},
     }
@@ -185,6 +199,32 @@ def _llamar_modelo(
     return _extraer_json(contenido), data.get("usage") or {}, duracion_ms
 
 
+class _Gasto:
+    """Acumula tokens, costo y tiempo de todas las llamadas de una foto.
+
+    Cada lectura se suma: verificar no es gratis y tiene que verse en el
+    reporte de gasto, aunque sea barato.
+    """
+
+    def __init__(self) -> None:
+        self.tokens_in = 0
+        self.tokens_out = 0
+        self.costo = 0.0
+        self.duracion = 0
+        self.lecturas = 0
+
+    def sumar(self, uso: dict, duracion_ms: int) -> None:
+        self.tokens_in += uso.get("prompt_tokens", 0)
+        self.tokens_out += uso.get("completion_tokens", 0)
+        self.costo += float(uso.get("cost") or 0.0)
+        self.duracion += duracion_ms
+        self.lecturas += 1
+
+
+def _lectura_dudosa(obs: Observacion, umbral: float) -> bool:
+    return obs.confianza_global < umbral or obs.calidad_foto == "mala"
+
+
 def analizar_foto(
     skus: Sequence[Sku],
     foto_data_url: str,
@@ -193,65 +233,110 @@ def analizar_foto(
     cadena: str = "",
     client: Optional[httpx.Client] = None,
 ) -> tuple[Observacion, UsoModelo]:
-    """Lee una foto de góndola y devuelve la observación cruda."""
+    """Lee una foto de góndola y devuelve la observación cruda.
+
+    Una sola llamada al modelo barato en el caso normal. Cuando esa lectura
+    no es confiable, la estrategia configurada decide qué hacer; por defecto
+    se pide una **segunda lectura al mismo modelo barato** con un método de
+    conteo distinto y se fusionan las dos (ver `consenso.py`).
+    """
     cfg = get_settings()
     if not cfg.openrouter_api_key:
         raise VisionError("Falta OPENROUTER_API_KEY.")
 
     codigos = {s.codigo for s in skus}
-    mensajes = construir_mensajes(skus, foto_data_url, hoja_referencia, categoria, cadena)
+    args_prompt = (skus, foto_data_url, hoja_referencia, categoria, cadena)
+    mensajes = construir_mensajes(*args_prompt)
 
     propio = client is None
     client = client or httpx.Client()
+    gasto = _Gasto()
+
     try:
         cuota_escalado.registrar_foto()
-        bruto, uso, duracion = _llamar_modelo(client, cfg.modelo_primario, mensajes)
+
+        bruto, uso, ms = _llamar_modelo(client, cfg.modelo_primario, mensajes)
+        gasto.sumar(uso, ms)
         obs = _normalizar(bruto, codigos)
-        modelo_usado, escalado = cfg.modelo_primario, False
-        tokens_in = uso.get("prompt_tokens", 0)
-        tokens_out = uso.get("completion_tokens", 0)
-        costo = float(uso.get("cost") or 0.0)
+        modelo_usado, escalado, nota = cfg.modelo_primario, False, None
 
-        necesita_escalar = (
-            obs.confianza_global < cfg.umbral_escalado or obs.calidad_foto == "mala"
+        if not _lectura_dudosa(obs, cfg.umbral_escalado):
+            return obs, _uso(modelo_usado, escalado, gasto, nota)
+
+        estrategia = cfg.estrategia_baja_confianza
+        log.info(
+            "Lectura dudosa (confianza %.2f, calidad %s) → estrategia '%s'",
+            obs.confianza_global, obs.calidad_foto, estrategia,
         )
-        if necesita_escalar and not cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria):
-            log.warning(
-                "Foto con confianza %.2f pero la cuota diaria de escalado está agotada (%s); "
-                "se conserva la lectura del modelo barato.",
-                obs.confianza_global, cuota_escalado.estado(),
-            )
-            necesita_escalar = False
 
-        if necesita_escalar and cfg.modelo_escalado != cfg.modelo_primario:
-            cuota_escalado.registrar_escalado()
-            log.info(
-                "Escalando a %s (confianza %.2f, calidad %s)",
-                cfg.modelo_escalado, obs.confianza_global, obs.calidad_foto,
-            )
+        # ── Consenso: segunda lectura del mismo modelo barato ────────
+        if estrategia == "consenso":
             try:
-                bruto2, uso2, duracion2 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
+                bruto2, uso2, ms2 = _llamar_modelo(
+                    client,
+                    cfg.modelo_primario,
+                    construir_mensajes_verificacion(*args_prompt),
+                    temperatura=cfg.temperatura_verificacion,
+                )
+                gasto.sumar(uso2, ms2)
                 obs2 = _normalizar(bruto2, codigos)
-                # Se acumula el costo de ambas llamadas: el escalado no es gratis
-                # y tiene que verse en el reporte de gasto.
-                tokens_in += uso2.get("prompt_tokens", 0)
-                tokens_out += uso2.get("completion_tokens", 0)
-                costo += float(uso2.get("cost") or 0.0)
-                duracion += duracion2
-                if obs2.confianza_global >= obs.confianza_global:
-                    obs, modelo_usado, escalado = obs2, cfg.modelo_escalado, True
-            except VisionError as exc:
-                # Si el escalado falla nos quedamos con la lectura barata.
-                log.warning("Falló el escalado, se conserva la lectura primaria: %s", exc)
+                obs, acuerdo = fusionar(obs, obs2)
+                nota = acuerdo.resumen()
 
-        return obs, UsoModelo(
-            modelo=modelo_usado,
-            escalado=escalado,
-            tokens_entrada=tokens_in,
-            tokens_salida=tokens_out,
-            costo_usd=round(costo, 6),
-            duracion_ms=duracion,
-        )
+                # Tercer intento solo si las dos lecturas se contradicen de
+                # verdad: ahí el modelo barato ya demostró que no puede con
+                # esta foto y vale pagar el grande.
+                if (
+                    cfg.umbral_acuerdo_para_escalar > 0
+                    and acuerdo.indice < cfg.umbral_acuerdo_para_escalar
+                    and cfg.modelo_escalado != cfg.modelo_primario
+                    and cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria)
+                ):
+                    log.info("Acuerdo de solo %.0f%%: se escala a %s", acuerdo.indice * 100, cfg.modelo_escalado)
+                    cuota_escalado.registrar_escalado()
+                    bruto3, uso3, ms3 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
+                    gasto.sumar(uso3, ms3)
+                    obs3 = _normalizar(bruto3, codigos)
+                    obs, modelo_usado, escalado = obs3, cfg.modelo_escalado, True
+                    nota = f"{nota}; resuelto por {cfg.modelo_escalado}"
+            except VisionError as exc:
+                # La verificación es una mejora, no un requisito: si falla
+                # nos quedamos con la primera lectura.
+                log.warning("Falló la lectura de verificación, se conserva la primera: %s", exc)
+                nota = "verificación fallida"
+
+        # ── Escalado directo al modelo grande ────────────────────────
+        elif estrategia == "escalado" and cfg.modelo_escalado != cfg.modelo_primario:
+            if not cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria):
+                log.warning(
+                    "Cuota diaria de escalado agotada (%s); se conserva la lectura barata.",
+                    cuota_escalado.estado(),
+                )
+            else:
+                cuota_escalado.registrar_escalado()
+                try:
+                    bruto2, uso2, ms2 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
+                    gasto.sumar(uso2, ms2)
+                    obs2 = _normalizar(bruto2, codigos)
+                    if obs2.confianza_global >= obs.confianza_global:
+                        obs, modelo_usado, escalado = obs2, cfg.modelo_escalado, True
+                except VisionError as exc:
+                    log.warning("Falló el escalado, se conserva la lectura primaria: %s", exc)
+
+        return obs, _uso(modelo_usado, escalado, gasto, nota)
     finally:
         if propio:
             client.close()
+
+
+def _uso(modelo: str, escalado: bool, gasto: _Gasto, nota: Optional[str]) -> UsoModelo:
+    return UsoModelo(
+        modelo=modelo,
+        escalado=escalado,
+        tokens_entrada=gasto.tokens_in,
+        tokens_salida=gasto.tokens_out,
+        costo_usd=round(gasto.costo, 6),
+        duracion_ms=gasto.duracion,
+        lecturas=gasto.lecturas,
+        nota_consenso=nota,
+    )

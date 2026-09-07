@@ -112,6 +112,36 @@ def construir_mensajes(
     ]
 
 
+# Segunda pasada de verificación. El enfoque tiene que ser DISTINTO al de
+# la primera: si solo se repitiera la misma pregunta, la respuesta sería un
+# eco y el acuerdo entre ambas no probaría nada.
+#
+# Acá se fuerza un recorrido sistemático bandeja por bandeja, que es la
+# forma en que un auditor humano cuenta de verdad y la que menos se salta
+# unidades en una fila larga.
+SYSTEM_VERIFICACION = SYSTEM + """
+
+MÉTODO OBLIGATORIO PARA ESTA LECTURA:
+Recorre la góndola BANDEJA POR BANDEJA, empezando por la más baja (nivel 1) y subiendo.
+Para cada bandeja, avanza de IZQUIERDA A DERECHA y ve nombrando lo que encuentras antes de contar.
+Cuenta las unidades de frente de UNA EN UNA; no estimes "varias" ni redondees a un número redondo.
+Si en una fila hay muchas unidades iguales, cuéntalas dos veces antes de responder.
+Trata cada bandeja como un problema separado: no asumas que se repite lo de la bandeja anterior."""
+
+
+def construir_mensajes_verificacion(
+    skus: Sequence[Sku],
+    foto_data_url: str,
+    hoja_referencia: str | None = None,
+    categoria: str = "",
+    cadena: str = "",
+) -> list[dict]:
+    """Mensajes de la segunda lectura, con el método de conteo explícito."""
+    mensajes = construir_mensajes(skus, foto_data_url, hoja_referencia, categoria, cadena)
+    mensajes[0] = {"role": "system", "content": SYSTEM_VERIFICACION}
+    return mensajes
+
+
 # Esquema estricto. Forzarlo por `response_format` evita el parseo frágil
 # de JSON dentro de bloques markdown.
 BBOX_SCHEMA = {
