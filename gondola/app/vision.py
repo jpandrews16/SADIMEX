@@ -189,7 +189,22 @@ def _normalizar(bruto: dict, codigos_validos: set[str]) -> Observacion:
             h["sku_codigo_sugerido"] = None
 
     bruto["niveles_visibles"] = max(1, int(bruto.get("niveles_visibles") or 1))
-    bruto["frentes_totales_lineal"] = max(0, int(bruto.get("frentes_totales_lineal") or 0))
+
+    # El total del lineal no puede ser menor que lo nuestro: sería un share
+    # of shelf mayor a 100%. El modelo lo devuelve mal cada tanto —tiende a
+    # leer "frentes totales" como "frentes míos"—, así que se pisa con el
+    # piso que sí es cierto. Un 0 se deja en 0 a propósito: es la señal de
+    # "no se pudo contar el lineal" y `rules.py` saca el share del promedio
+    # en vez de inventar un denominador.
+    total = max(0, int(bruto.get("frentes_totales_lineal") or 0))
+    propios = sum(d["frentes"] for d in detecciones)
+    if 0 < total < propios:
+        log.info(
+            "Lineal mal contado: %d totales < %d frentes propios; se usa el mayor",
+            total, propios,
+        )
+        total = propios
+    bruto["frentes_totales_lineal"] = total
 
     try:
         return Observacion.model_validate(bruto)

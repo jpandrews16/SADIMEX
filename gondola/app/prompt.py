@@ -19,6 +19,7 @@ Tu única función es DESCRIBIR con precisión lo que aparece en una foto de gó
 
 Reglas que no puedes romper:
 1. Solo reportas SKU que estén en el CATÁLOGO que se te entrega. Si ves un producto de otra marca, NO lo reportes como detección: solo cuéntalo dentro de `frentes_totales_lineal`.
+1b. `frentes_totales_lineal` NO depende del catálogo. Es cuántos envases se ven de frente en TODA la sección fotografiada, sumando todas las marcas: las tuyas, las de la competencia y las que no reconoces. Si en la foto hay productos, este número es mayor que cero AUNQUE no encuentres ningún SKU del catálogo. Cuéntalo bandeja por bandeja y suma. Solo puede ser 0 si la góndola está literalmente vacía.
 2. Si no estás seguro de cuál variante exacta es, reporta el SKU más probable con una confianza BAJA (por ejemplo 0.45). Nunca inventes un código que no esté en el catálogo.
 3. Los niveles se cuentan desde ABAJO: nivel 1 = la bandeja más cercana al piso.
 4. AGRUPA. Un item de `detecciones` representa un GRUPO de unidades del mismo SKU juntas en la misma bandeja, no una unidad suelta. Si ves 5 paquetes iguales en fila, eso es UNA detección con `frentes: 5`, nunca cinco detecciones de un frente. Solo abres una segunda detección del mismo SKU si está en otra bandeja o separado por otro producto.
@@ -95,8 +96,10 @@ def construir_mensajes(
                 "- nivel_ojos: qué bandeja queda a la altura de los ojos de un adulto "
                 "de pie frente al mueble (típicamente la penúltima de arriba hacia abajo).\n"
                 "- mueble_completo_visible: false si la foto corta el mueble por arriba o por abajo.\n"
-                "- frentes_totales_lineal: frentes de TODAS las marcas en la sección visible, "
-                "incluida la competencia. Es el denominador del share of shelf.\n"
+                "- frentes_totales_lineal: cuenta bandeja por bandeja TODOS los envases "
+                "que se ven de frente, de cualquier marca —las del catálogo, la "
+                "competencia y las que no reconozcas— y suma. Es el denominador del "
+                "share of shelf, así que no puede ser 0 si hay producto en la foto.\n"
                 "- detecciones: un item por cada GRUPO de unidades del mismo SKU en una bandeja.\n"
                 "- huecos: espacios vacíos en las bandejas.\n"
                 "- etiquetas: cada etiqueta de precio del riel.\n"

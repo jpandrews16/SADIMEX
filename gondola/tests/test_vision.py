@@ -108,6 +108,33 @@ def test_niveles_visibles_nunca_es_cero():
     assert obs.niveles_visibles == 1
 
 
+def test_el_lineal_nunca_es_menor_que_los_frentes_propios():
+    """Si el total del lineal fuera menor que lo nuestro, el share of shelf
+    saldría arriba de 100% y la sala aparecería mejor de lo que está."""
+    obs = _normalizar(
+        bruto(
+            frentes_totales_lineal=3,
+            detecciones=[deteccion("WILD-FRESA", frentes=8)],
+        ),
+        CODIGOS,
+    )
+    assert obs.frentes_totales_lineal == 8
+
+
+def test_un_lineal_en_cero_se_respeta_como_no_medido():
+    """0 significa "no pude contar el lineal", no "la góndola está llena de
+    lo nuestro": rules.py saca el share del promedio en vez de inventar un
+    denominador. Pisarlo con los frentes propios daría 100% de share."""
+    obs = _normalizar(
+        bruto(
+            frentes_totales_lineal=0,
+            detecciones=[deteccion("WILD-FRESA", frentes=8)],
+        ),
+        CODIGOS,
+    )
+    assert obs.frentes_totales_lineal == 0
+
+
 # =====================================================================
 # Prompt
 # =====================================================================
