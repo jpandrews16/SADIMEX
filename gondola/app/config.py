@@ -41,9 +41,22 @@ class Settings(BaseSettings):
     estrategia_baja_confianza: str = "consenso"
 
     # Por debajo de esta confianza global se aplica la estrategia anterior.
-    # Con volumen alto este número es la perilla del gasto: subirlo verifica
-    # más fotos y cuesta más; bajarlo abarata y deja pasar más error.
+    # OJO: la autoevaluación del modelo es poco fiable —en pruebas reales
+    # se declara 95% seguro incluso cuando inventa huecos—, así que este
+    # umbral casi nunca se dispara solo. Lo que de verdad decide la
+    # verificación son las señales de riesgo de abajo.
     umbral_escalado: float = 0.75
+
+    # Verificar con una segunda lectura cuando la PRIMERA reporta algo que,
+    # de ser falso, cuesta trabajo humano y credibilidad. Cada uno se puede
+    # apagar por separado si en tu operación no aplica.
+    verificar_si_hay_huecos: bool = True          # falso quiebre → visita en vano
+    verificar_si_precio_fuera_rango: bool = True  # falsa acusación a la sala
+    verificar_si_falta_prioritario: bool = True   # falsa reposición de urgencia
+
+    # Tope de verificaciones por día, como fracción de las fotos. Protege
+    # la factura si el modelo empieza a reportar huecos en todas partes.
+    verificacion_max_fraccion_diaria: float = 0.50
 
     # La segunda lectura necesita algo de temperatura: con 0 devolvería la
     # misma respuesta y el acuerdo no probaría nada.

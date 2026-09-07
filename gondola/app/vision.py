@@ -28,7 +28,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 import httpx
 from pydantic import ValidationError
@@ -36,7 +36,8 @@ from pydantic import ValidationError
 from .config import get_settings
 from .consenso import fusionar
 from .prompt import RESPONSE_FORMAT, construir_mensajes, construir_mensajes_verificacion
-from .schemas import Observacion, Sku, UsoModelo
+from .riesgo import motivos_para_verificar
+from .schemas import Observacion, Precio, Sku, UsoModelo
 
 log = logging.getLogger(__name__)
 
@@ -45,55 +46,59 @@ class VisionError(RuntimeError):
     """El modelo no devolvió una observación utilizable."""
 
 
-class CuotaEscalado:
-    """Tope diario de escalados al modelo grande.
+class CuotaDiaria:
+    """Tope de llamadas extra por día, como fracción de las fotos del día.
 
     Con volumen alto, un lote de fotos malas (una sala con contraluz, un
-    reponedor nuevo con mal pulso) puede mandar todo al modelo caro y
-    multiplicar la factura del día sin que nadie se entere. Este contador
-    corta el escalado cuando pasa de la fracción configurada.
+    reponedor nuevo con mal pulso) puede disparar verificaciones o
+    escalados en cascada y multiplicar la factura sin que nadie se entere.
+    Este contador corta cuando se pasa de la fracción configurada.
 
     Vive en memoria del proceso: con varias réplicas del worker cada una
     lleva su propia cuota, lo que reparte el tope de forma proporcional.
     No necesita ser exacto, necesita evitar la sorpresa a fin de mes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, nombre: str) -> None:
+        self.nombre = nombre
         self._dia: Optional[str] = None
         self._total = 0
-        self._escalados = 0
+        self._usados = 0
 
     def _rotar(self) -> None:
         hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if hoy != self._dia:
-            self._dia, self._total, self._escalados = hoy, 0, 0
+            self._dia, self._total, self._usados = hoy, 0, 0
 
     def registrar_foto(self) -> None:
         self._rotar()
         self._total += 1
 
-    def permite_escalar(self, fraccion_max: float) -> bool:
+    def permite(self, fraccion_max: float) -> bool:
         self._rotar()
         if fraccion_max >= 1.0:
             return True
         if fraccion_max <= 0:
             return False
-        # Las primeras fotos del día siempre pueden escalar: sin esto,
-        # con el total en 1 ninguna pasaría nunca el umbral.
-        if self._escalados == 0:
+        # La primera del día siempre pasa: sin esto, con el total en 1
+        # ninguna llegaría nunca al umbral.
+        if self._usados == 0:
             return True
-        return self._escalados < self._total * fraccion_max
+        return self._usados < self._total * fraccion_max
 
-    def registrar_escalado(self) -> None:
+    def registrar_uso(self) -> None:
         self._rotar()
-        self._escalados += 1
+        self._usados += 1
 
     def estado(self) -> dict:
         self._rotar()
-        return {"dia": self._dia, "fotos": self._total, "escalados": self._escalados}
+        return {"dia": self._dia, "fotos": self._total, self.nombre: self._usados}
 
 
-cuota_escalado = CuotaEscalado()
+# Las fotos se cuentan una sola vez, en la cuota de verificación; la de
+# escalado comparte ese total a través de `registrar_foto` en ambas.
+cuota_verificacion = CuotaDiaria("verificaciones")
+cuota_escalado = CuotaDiaria("escalados")
 
 
 def _headers() -> dict[str, str]:
@@ -221,8 +226,16 @@ class _Gasto:
         self.lecturas += 1
 
 
-def _lectura_dudosa(obs: Observacion, umbral: float) -> bool:
-    return obs.confianza_global < umbral or obs.calidad_foto == "mala"
+def _filtrar_motivos(motivos: list[str], cfg) -> list[str]:
+    """Aplica los interruptores de configuración a los motivos detectados."""
+    apagados = []
+    if not cfg.verificar_si_hay_huecos:
+        apagados.append("hueco")
+    if not cfg.verificar_si_precio_fuera_rango:
+        apagados.append("precio fuera de rango")
+    if not cfg.verificar_si_falta_prioritario:
+        apagados.append("SKU prioritario")
+    return [m for m in motivos if not any(a in m for a in apagados)]
 
 
 def analizar_foto(
@@ -232,13 +245,19 @@ def analizar_foto(
     categoria: str = "",
     cadena: str = "",
     client: Optional[httpx.Client] = None,
+    precios: Optional[Mapping[str, Precio]] = None,
 ) -> tuple[Observacion, UsoModelo]:
     """Lee una foto de góndola y devuelve la observación cruda.
 
-    Una sola llamada al modelo barato en el caso normal. Cuando esa lectura
-    no es confiable, la estrategia configurada decide qué hacer; por defecto
-    se pide una **segunda lectura al mismo modelo barato** con un método de
-    conteo distinto y se fusionan las dos (ver `consenso.py`).
+    Una sola llamada al modelo barato en el caso normal. Se pide una
+    **segunda lectura al mismo modelo barato**, con un método de conteo
+    distinto, cuando la primera reporta algo que sería caro si fuera falso:
+    un hueco, un precio fuera de rango o un SKU prioritario ausente
+    (ver `riesgo.py`). Las dos lecturas se fusionan en `consenso.py`.
+
+    `precios` es opcional pero conviene pasarlo: sin él no se puede saber
+    si un precio leído está fuera de rango, y se pierde uno de los tres
+    motivos de verificación.
     """
     cfg = get_settings()
     if not cfg.openrouter_api_key:
@@ -253,6 +272,7 @@ def analizar_foto(
     gasto = _Gasto()
 
     try:
+        cuota_verificacion.registrar_foto()
         cuota_escalado.registrar_foto()
 
         bruto, uso, ms = _llamar_modelo(client, cfg.modelo_primario, mensajes)
@@ -260,17 +280,30 @@ def analizar_foto(
         obs = _normalizar(bruto, codigos)
         modelo_usado, escalado, nota = cfg.modelo_primario, False, None
 
-        if not _lectura_dudosa(obs, cfg.umbral_escalado):
+        motivos = _filtrar_motivos(
+            motivos_para_verificar(
+                obs, skus, precios,
+                umbral_confianza=cfg.umbral_escalado,
+                umbral_deteccion=cfg.umbral_deteccion,
+            ),
+            cfg,
+        )
+        if not motivos:
             return obs, _uso(modelo_usado, escalado, gasto, nota)
 
+        if not cuota_verificacion.permite(cfg.verificacion_max_fraccion_diaria):
+            log.warning(
+                "Habría que verificar (%s) pero la cuota diaria está agotada (%s).",
+                "; ".join(motivos), cuota_verificacion.estado(),
+            )
+            return obs, _uso(modelo_usado, escalado, gasto, "verificación omitida por cuota")
+
         estrategia = cfg.estrategia_baja_confianza
-        log.info(
-            "Lectura dudosa (confianza %.2f, calidad %s) → estrategia '%s'",
-            obs.confianza_global, obs.calidad_foto, estrategia,
-        )
+        log.info("Verificando porque %s → estrategia '%s'", "; ".join(motivos), estrategia)
 
         # ── Consenso: segunda lectura del mismo modelo barato ────────
         if estrategia == "consenso":
+            cuota_verificacion.registrar_uso()
             try:
                 bruto2, uso2, ms2 = _llamar_modelo(
                     client,
@@ -281,7 +314,7 @@ def analizar_foto(
                 gasto.sumar(uso2, ms2)
                 obs2 = _normalizar(bruto2, codigos)
                 obs, acuerdo = fusionar(obs, obs2)
-                nota = acuerdo.resumen()
+                nota = f"verificada ({motivos[0]}); {acuerdo.resumen()}"
 
                 # Tercer intento solo si las dos lecturas se contradicen de
                 # verdad: ahí el modelo barato ya demostró que no puede con
@@ -290,10 +323,10 @@ def analizar_foto(
                     cfg.umbral_acuerdo_para_escalar > 0
                     and acuerdo.indice < cfg.umbral_acuerdo_para_escalar
                     and cfg.modelo_escalado != cfg.modelo_primario
-                    and cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria)
+                    and cuota_escalado.permite(cfg.escalado_max_fraccion_diaria)
                 ):
                     log.info("Acuerdo de solo %.0f%%: se escala a %s", acuerdo.indice * 100, cfg.modelo_escalado)
-                    cuota_escalado.registrar_escalado()
+                    cuota_escalado.registrar_uso()
                     bruto3, uso3, ms3 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
                     gasto.sumar(uso3, ms3)
                     obs3 = _normalizar(bruto3, codigos)
@@ -307,13 +340,13 @@ def analizar_foto(
 
         # ── Escalado directo al modelo grande ────────────────────────
         elif estrategia == "escalado" and cfg.modelo_escalado != cfg.modelo_primario:
-            if not cuota_escalado.permite_escalar(cfg.escalado_max_fraccion_diaria):
+            if not cuota_escalado.permite(cfg.escalado_max_fraccion_diaria):
                 log.warning(
                     "Cuota diaria de escalado agotada (%s); se conserva la lectura barata.",
                     cuota_escalado.estado(),
                 )
             else:
-                cuota_escalado.registrar_escalado()
+                cuota_escalado.registrar_uso()
                 try:
                     bruto2, uso2, ms2 = _llamar_modelo(client, cfg.modelo_escalado, mensajes)
                     gasto.sumar(uso2, ms2)

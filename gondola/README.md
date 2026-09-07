@@ -66,10 +66,27 @@ El flujo es 100% automático. Tres mecanismos sostienen el acierto:
    solo cambia el color de la banda.
 
 2. **Consenso de dos lecturas baratas.** Toda foto pasa una vez por el
-   modelo barato. Si esa lectura no es confiable, se pide una **segunda al
-   mismo modelo barato** con un método de conteo distinto (recorrido
-   bandeja por bandeja, de abajo hacia arriba) y se fusionan las dos.
-   Solo si se contradicen de verdad se paga el modelo grande.
+   modelo barato. Se pide una **segunda lectura al mismo modelo barato**
+   —con un método de conteo distinto: recorrido bandeja por bandeja de
+   abajo hacia arriba— cuando la primera reporta algo que sería caro si
+   fuera falso. Solo si se contradicen de verdad se paga el modelo grande.
+
+   **Qué dispara la verificación, y por qué no es la confianza del modelo.**
+   En la primera prueba real, Qwen se declaró 95% seguro y reportó 12
+   huecos que no existían. La autoevaluación de un modelo no mide su
+   acierto. Lo que sí sirve es verificar **cuando equivocarse sale caro**
+   (`riesgo.py`):
+
+   | Señal en la primera lectura | Qué pasa si es falsa |
+   |---|---|
+   | Reporta un hueco | Un supervisor va a una sala donde no había problema |
+   | Precio fuera de tolerancia | Se acusa a la sala de algo que no hizo |
+   | Falta un SKU prioritario | Se dispara una reposición de urgencia en vano |
+
+   Los tres cuestan trabajo humano y credibilidad, que valen mucho más que
+   la décima de centavo de una segunda lectura. Una foto limpia se queda
+   con una sola. En la prueba real, este cambio descartó **10 de los 12
+   huecos inventados**.
 
    Esto es mejor *y* más barato que escalar directo:
    - Dos llamadas al chico cuestan menos que una al grande, sobre todo en
@@ -137,6 +154,7 @@ gondola/
 │   ├── reference_sheet.py  Mosaico de packshots + normalizado de la foto
 │   ├── prompt.py           Prompt de observación + JSON schema estricto
 │   ├── vision.py           Cliente OpenRouter: 1 lectura, o 2 en consenso
+│   ├── riesgo.py           ★ Cuándo vale la pena leer la foto dos veces
 │   ├── consenso.py         ★ Fusión conservadora de dos lecturas
 │   ├── rules.py            ★ Motor determinístico de las 6 reglas
 │   ├── pipeline.py         Orquestación foto → análisis persistido
@@ -147,8 +165,9 @@ gondola/
 ├── tools/
 │   ├── comparar_modelos.py         Compara modelos sobre TUS fotos con métricas reales
 │   ├── importar_catalogo_canva.py  PDF de Canva → packshots + catálogo CSV
-│   └── normalizar_marcas.py        Unifica marcas escritas de varias formas
-├── tests/                  165 tests: reglas, consenso, evidencia, costos, CSV
+│   ├── normalizar_marcas.py        Unifica marcas escritas de varias formas
+│   └── probar_foto.py              Analiza una foto sin base de datos
+├── tests/                  182 tests: reglas, consenso, evidencia, costos, CSV
 ├── catalogo.ejemplo.json   Catálogo de arranque
 ├── Dockerfile
 ├── railway.json            Servicio API
@@ -450,7 +469,7 @@ Vistas SQL creadas por las migraciones:
 python -m pytest gondola/tests -q
 ```
 
-165 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
+182 tests, sin red ni base de datos. Cubren el motor de reglas (incluidos
 los casos que protegen al reponedor: sin PVP cargado no se penaliza, sin
 mueble completo no se evalúa la altura), la jerarquía de resolución de
 reglas y precios, el saneamiento de la respuesta del modelo, la validación

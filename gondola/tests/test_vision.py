@@ -159,6 +159,17 @@ def test_el_esquema_exige_todos_los_campos_de_observacion():
 # =====================================================================
 
 
+@pytest.fixture(autouse=True)
+def cuotas_limpias():
+    """Las cuotas son globales del proceso: sin esto un test contamina al
+    siguiente y los fallos dependen del orden de ejecución."""
+    from gondola.app import vision
+
+    for cuota in (vision.cuota_verificacion, vision.cuota_escalado):
+        cuota._dia, cuota._total, cuota._usados = None, 0, 0
+    yield
+
+
 @pytest.fixture
 def registrar_llamadas(monkeypatch):
     """Reemplaza la llamada real y anota (modelo, temperatura) de cada una."""
@@ -173,7 +184,6 @@ def registrar_llamadas(monkeypatch):
         return respuestas[i], {"prompt_tokens": 100, "completion_tokens": 50, "cost": 0.0001}, 500
 
     monkeypatch.setattr(vision, "_llamar_modelo", falsa)
-    monkeypatch.setattr(vision.cuota_escalado, "_dia", None)
     return llamadas, respuestas
 
 
@@ -221,6 +231,7 @@ def test_una_lectura_dudosa_dispara_una_segunda_al_mismo_modelo_barato(
     assert llamadas[0][0] == llamadas[1][0] == cfg.modelo_primario
     assert uso.escalado is False
     assert uso.lecturas == 2
+    assert "verificada" in (uso.nota_consenso or "")
     assert "acuerdo" in (uso.nota_consenso or "")
 
 
@@ -314,3 +325,95 @@ def test_la_estrategia_ninguna_se_queda_con_la_primera_lectura(
     vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
 
     assert len(llamadas) == 1
+
+
+def test_un_hueco_dispara_la_verificacion_aunque_la_confianza_sea_alta(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    """El caso real: Qwen reportó 95% de confianza y 12 huecos inventados.
+    Antes de este cambio, esa foto se procesaba con una sola lectura."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    llamadas, respuestas = registrar_llamadas
+
+    con_hueco = _respuesta(0.95)
+    con_hueco["huecos"] = [{
+        "nivel": 3, "bbox": {"x0": 0, "y0": 0, "x1": 100, "y1": 100},
+        "ancho_frentes_aprox": 3, "sku_codigo_sugerido": None,
+    }]
+    respuestas.extend([con_hueco, _respuesta(0.95)])
+
+    obs_final, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 2
+    assert uso.lecturas == 2
+    assert "hueco" in (uso.nota_consenso or "")
+    # La segunda lectura no lo vio: el hueco no sobrevive al consenso.
+    assert obs_final.huecos == []
+
+
+def test_un_precio_fuera_de_rango_dispara_la_verificacion(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    from gondola.app import vision
+    from gondola.app.schemas import Precio
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    llamadas, respuestas = registrar_llamadas
+
+    con_precio_malo = _respuesta(0.95)
+    con_precio_malo["etiquetas"] = [{
+        "texto_producto": "A", "precio_leido": 99.0, "moneda": "BOB", "legible": True,
+        "nivel": 3, "bbox": {"x0": 0, "y0": 0, "x1": 10, "y1": 10},
+        "sku_asociado": "NOEL-A", "confianza": 0.9, "es_promocion": False,
+    }]
+    respuestas.extend([con_precio_malo, _respuesta(0.95)])
+
+    _obs, uso = vision.analizar_foto(
+        skus_min, "data:image/jpeg;base64,AAA",
+        precios={"NOEL-A": Precio(sku_id="s1", pvp=12.50, tolerancia_pct=3.0)},
+    )
+
+    assert len(llamadas) == 2
+    assert "precio fuera de rango" in (uso.nota_consenso or "")
+
+
+def test_la_cuota_diaria_corta_las_verificaciones(registrar_llamadas, skus_min, monkeypatch):
+    """Si el modelo empieza a reportar huecos en todas partes, el gasto
+    no puede dispararse en cascada."""
+    from gondola.app import vision
+
+    cfg = vision.get_settings()
+    monkeypatch.setattr(cfg, "openrouter_api_key", "test", raising=False)
+    monkeypatch.setattr(cfg, "verificacion_max_fraccion_diaria", 0.0, raising=False)
+    llamadas, respuestas = registrar_llamadas
+    respuestas.append(_respuesta(0.3))
+
+    _obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 1
+    assert uso.nota_consenso == "verificación omitida por cuota"
+
+
+def test_los_interruptores_de_configuracion_apagan_un_motivo(
+    registrar_llamadas, skus_min, monkeypatch
+):
+    from gondola.app import vision
+
+    cfg = vision.get_settings()
+    monkeypatch.setattr(cfg, "openrouter_api_key", "test", raising=False)
+    monkeypatch.setattr(cfg, "verificar_si_hay_huecos", False, raising=False)
+    llamadas, respuestas = registrar_llamadas
+
+    con_hueco = _respuesta(0.95)
+    con_hueco["huecos"] = [{
+        "nivel": 3, "bbox": {"x0": 0, "y0": 0, "x1": 100, "y1": 100},
+        "ancho_frentes_aprox": 3, "sku_codigo_sugerido": None,
+    }]
+    respuestas.append(con_hueco)
+
+    _obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert len(llamadas) == 1
+    assert uso.lecturas == 1

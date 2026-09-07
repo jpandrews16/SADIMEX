@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from gondola.app.reference_sheet import seleccionar_para_hoja
 from gondola.app.schemas import Sku
-from gondola.app.vision import CuotaEscalado
+from gondola.app.vision import CuotaDiaria
 
 
 def sku(codigo: str, prioritario: bool = False, con_foto: bool = True) -> Sku:
@@ -65,57 +65,57 @@ def test_los_sku_sin_packshot_no_ocupan_lugar():
 
 
 def test_la_primera_foto_del_dia_siempre_puede_escalar():
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     cuota.registrar_foto()
-    assert cuota.permite_escalar(0.20) is True
+    assert cuota.permite(0.20) is True
 
 
 def test_la_cuota_corta_cuando_se_pasa_de_la_fraccion():
     """Un lote de fotos malas no puede multiplicar la factura del día."""
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     for _ in range(10):
         cuota.registrar_foto()
 
     # Tope 20% de 10 fotos = 2 escalados.
-    assert cuota.permite_escalar(0.20)
-    cuota.registrar_escalado()
-    assert cuota.permite_escalar(0.20)
-    cuota.registrar_escalado()
-    assert not cuota.permite_escalar(0.20)
+    assert cuota.permite(0.20)
+    cuota.registrar_uso()
+    assert cuota.permite(0.20)
+    cuota.registrar_uso()
+    assert not cuota.permite(0.20)
 
 
 def test_fraccion_cero_desactiva_el_escalado():
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     cuota.registrar_foto()
-    assert cuota.permite_escalar(0.0) is False
+    assert cuota.permite(0.0) is False
 
 
 def test_fraccion_uno_deja_escalar_siempre():
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     for _ in range(3):
         cuota.registrar_foto()
-        cuota.registrar_escalado()
-    assert cuota.permite_escalar(1.0) is True
+        cuota.registrar_uso()
+    assert cuota.permite(1.0) is True
 
 
 def test_la_cuota_se_reinicia_al_cambiar_el_dia():
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     for _ in range(10):
         cuota.registrar_foto()
-    cuota.registrar_escalado()
-    cuota.registrar_escalado()
-    assert not cuota.permite_escalar(0.20)
+    cuota.registrar_uso()
+    cuota.registrar_uso()
+    assert not cuota.permite(0.20)
 
     cuota._dia = "1999-01-01"  # fuerza la rotación
 
     assert cuota.estado()["fotos"] == 0
-    assert cuota.permite_escalar(0.20) is True
+    assert cuota.permite(0.20) is True
 
 
 def test_el_estado_reporta_el_consumo():
-    cuota = CuotaEscalado()
+    cuota = CuotaDiaria("escalados")
     cuota.registrar_foto()
-    cuota.registrar_escalado()
+    cuota.registrar_uso()
 
     estado = cuota.estado()
 

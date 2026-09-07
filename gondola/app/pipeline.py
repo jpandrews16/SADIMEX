@@ -147,6 +147,9 @@ def analizar(foto: dict) -> tuple[Analisis, list[dict]]:
         hoja_referencia=construir_hoja_referencia(ctx.skus),
         categoria=foto["categoria"],
         cadena=ctx.cadena_nombre,
+        # Sin los precios no se puede detectar un precio fuera de rango,
+        # que es uno de los tres motivos para verificar la lectura.
+        precios=ctx.precios,
     )
 
     evaluacion, detalle = evaluar_observacion(observacion, ctx)

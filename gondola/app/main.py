@@ -47,12 +47,13 @@ app.include_router(admin_router)
 @app.get("/health")
 def health() -> dict:
     """Chequeo que Railway usa para saber si el servicio está vivo."""
-    from .vision import cuota_escalado
+    from .vision import cuota_escalado, cuota_verificacion
 
     return {
         "ok": True,
         "modelo_primario": cfg.modelo_primario,
         "modelo_escalado": cfg.modelo_escalado,
+        "cuota_verificacion": cuota_verificacion.estado(),
         "cuota_escalado": cuota_escalado.estado(),
         "supabase_configurado": bool(cfg.supabase_url and cfg.supabase_service_role_key),
         "openrouter_configurado": bool(cfg.openrouter_api_key),
