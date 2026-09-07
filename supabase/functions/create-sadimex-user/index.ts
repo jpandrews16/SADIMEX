@@ -40,7 +40,7 @@ Deno.serve(async (req: Request) => {
         return json({ error: "Todos los campos son requeridos" }, 400);
     }
 
-    const VALID_ROLES = ["gerente", "supervisor", "vendedor", "admin"];
+    const VALID_ROLES = ["gerente", "supervisor", "vendedor", "reponedor", "admin"];
     const VALID_CITIES = ["LPZ", "CBBA", "SCZ", "NACIONAL"];
     if (!VALID_ROLES.includes(rol)) return json({ error: "Rol inválido" }, 400);
     if (!VALID_CITIES.includes(ciudad)) return json({ error: "Ciudad inválida" }, 400);

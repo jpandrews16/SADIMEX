@@ -7,6 +7,9 @@ const nav = [
     { label: 'Mi Equipo',          icon: '🧑‍💼', view: 'supervisor', roles: ['supervisor'] },
     { label: 'Mis Visitas',        icon: '📋', view: 'vendedor',   roles: ['vendedor'] },
     { label: 'Registrar Visita',   icon: '🎙️', view: 'upload',     roles: ['admin', 'gerente', 'supervisor', 'vendedor'] },
+    // Lector de góndola: los reponedores solo capturan; supervisión ve el tablero.
+    { label: 'Auditar Góndola',    icon: '📷', view: 'gondola-captura',   roles: ['admin', 'supervisor', 'reponedor', 'vendedor'] },
+    { label: 'Ejecución en Sala',  icon: '🛒', view: 'gondola-dashboard', roles: ['admin', 'gerente', 'supervisor'] },
 ];
 
 function ChangePasswordForm({ onClose }) {
@@ -71,7 +74,7 @@ function ChangePasswordForm({ onClose }) {
 export default function Sidebar({ role, view, currentUser, onViewChange, onLogout }) {
     const [showChangePwd, setShowChangePwd] = useState(false);
 
-    const defaultEmoji = { admin: '⚙️', gerente: '👔', supervisor: '📊', vendedor: '🧑‍💼' }[role] || '👤';
+    const defaultEmoji = { admin: '⚙️', gerente: '👔', supervisor: '📊', vendedor: '🧑‍💼', reponedor: '📷' }[role] || '👤';
     const firstName    = currentUser?.nombre?.split(' ')[0] || 'Usuario';
     const lastName     = currentUser?.nombre?.split(' ')[1] || '';
     const shortName    = `${firstName} ${lastName}`.trim();

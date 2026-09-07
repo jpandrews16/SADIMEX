@@ -20,6 +20,7 @@ const ROLES = [
     { val: 'gerente', label: 'Gerente', desc: 'Acceso a dashboard nacional', icon: '👔' },
     { val: 'supervisor', label: 'Supervisor', desc: 'Gestión de equipo por ciudad', icon: '📊' },
     { val: 'vendedor', label: 'Vendedor', desc: 'Vista personal de visitas', icon: '🧑‍💼' },
+    { val: 'reponedor', label: 'Reponedor', desc: 'Solo audita góndolas en sala', icon: '📷' },
 ];
 
 const ROL_COLORS = {
@@ -27,6 +28,7 @@ const ROL_COLORS = {
     gerente: { bg: '#ffedd5', color: '#c2410c', badge: 'Gerente' },
     supervisor: { bg: '#e0f2fe', color: '#0369a1', badge: 'Supervisor' },
     vendedor: { bg: '#f3e8ff', color: '#7e22ce', badge: 'Vendedor' },
+    reponedor: { bg: '#dcfce7', color: '#15803d', badge: 'Reponedor' },
 };
 
 const inputCls = {

@@ -9,13 +9,18 @@ const SupervisorView = lazy(() => import('./views/SupervisorView.jsx'));
 const VendedorView  = lazy(() => import('./views/VendedorView.jsx'));
 const UploadAudio   = lazy(() => import('./views/UploadAudio.jsx'));
 const AdminView     = lazy(() => import('./views/AdminView.jsx'));
+const CapturaGondola   = lazy(() => import('./views/CapturaGondola.jsx'));
+const GondolaDashboard = lazy(() => import('./views/GondolaDashboard.jsx'));
 
 const VIEW_COMPONENTS = {
   admin: AdminView, gerencia: GerenciaView,
   supervisor: SupervisorView, vendedor: VendedorView, upload: UploadAudio,
+  'gondola-captura': CapturaGondola, 'gondola-dashboard': GondolaDashboard,
 };
 const ROL_DEFAULT_VIEW = {
   admin: 'admin', gerente: 'gerencia', supervisor: 'supervisor', vendedor: 'vendedor',
+  // El reponedor entra directo a capturar: es lo único que hace en la app.
+  reponedor: 'gondola-captura',
 };
 
 function LoadingFallback() {

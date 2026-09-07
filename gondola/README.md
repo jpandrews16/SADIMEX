@@ -440,5 +440,31 @@ Estos puntos dependen de datos que todavía no están en el repo:
    solo calidad de ejecución. Requiere una tabla nueva.
 5. **Captura offline** — dentro del súper suele no haber señal; hoy el
    frontend asume conexión al subir.
-6. **Frontend del módulo** — hoy existe la API; falta la pantalla de
-   captura del reponedor y el tablero del supervisor.
+6. **Deploy** — el código está listo; falta aplicar las migraciones en
+   Supabase y levantar los dos servicios en Railway.
+
+---
+
+## Frontend
+
+Dos pantallas nuevas en la app de Vercel, con el rol `reponedor` sumado al
+sistema de usuarios:
+
+| Vista | Quién | Qué hace |
+|-------|-------|----------|
+| **Auditar Góndola** (`gondola-captura`) | reponedor, supervisor, admin | Elegir sala y categoría, tomar la foto y ver el resultado |
+| **Ejecución en Sala** (`gondola-dashboard`) | supervisor, gerente, admin | Qué corregir, ranking de reponedores, salud por sala, historial |
+
+La pantalla de captura está pensada para usarse **de pie frente al mueble,
+con una mano, en un supermercado con mala señal**: dos selectores, un botón
+grande de cámara (`capture="environment"` abre la cámara directo en el
+celular) y el GPS se pide al abrir la pantalla, no al enviar, para no hacer
+esperar. Si el reponedor niega el permiso la foto se sube igual y queda
+marcada como "sin geolocalización" en vez de bloquearse.
+
+El tablero abre en **"Qué corregir"**, no en gráficos: lo primero que un
+supervisor necesita es la lista de lo que hay que ir a arreglar hoy,
+ordenada por severidad y con la sala de cada hallazgo.
+
+Requiere `VITE_GONDOLA_API_URL` apuntando al servicio de Railway. Si falta,
+la pantalla lo dice en lugar de fallar en silencio.
