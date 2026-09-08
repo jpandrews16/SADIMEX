@@ -47,6 +47,22 @@ class Settings(BaseSettings):
     # verificación son las señales de riesgo de abajo.
     umbral_escalado: float = 0.75
 
+    # Releer la foto cuando la primera lectura no encontró NINGÚN SKU del
+    # catálogo.
+    #
+    # Es el fallo más caro que tiene este módulo hoy y el más difícil de
+    # ver, porque la respuesta es un JSON perfectamente válido con la
+    # lista de detecciones vacía. Medido sobre fotos de sala con la misma
+    # imagen, el mismo prompt y temperatura 0: la lista vino vacía en 2 de
+    # cada 6 llamadas, y en las otras 4 encontró entre 6 y 9 SKU. O sea
+    # que un tercio de las fotos se perdía sin que nada lo marcara, y
+    # aparecía como quiebre total de la marca —el error que manda a un
+    # supervisor a una sala que estaba bien surtida—.
+    #
+    # La relectura NO consume la cuota de verificación a propósito: no es
+    # verificar un hallazgo dudoso, es que la respuesta llegó en blanco.
+    releer_si_no_encuentra_nada: bool = True
+
     # Verificar con una segunda lectura cuando la PRIMERA reporta algo que,
     # de ser falso, cuesta trabajo humano y credibilidad. Cada uno se puede
     # apagar por separado si en tu operación no aplica.

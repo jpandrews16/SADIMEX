@@ -458,6 +458,33 @@ def analizar_foto(
         obs = _normalizar(bruto, codigos)
         modelo_usado, escalado, nota = cfg.modelo_primario, False, None
 
+        # Una lectura que no encontró NADA sobre una góndola con producto
+        # es, medido, casi siempre una respuesta en blanco y no una
+        # góndola sin nuestros productos. Sobre la misma foto, el mismo
+        # prompt y temperatura 0, la lista de detecciones vino vacía en 2
+        # de cada 6 llamadas; en las otras 4 encontró entre 6 y 9 SKU.
+        #
+        # Se relee UNA vez, y a propósito fuera de la cuota de
+        # verificación: esto no es verificar un hallazgo dudoso, es que la
+        # respuesta llegó en blanco. Si la segunda lectura tampoco
+        # encuentra nada, se acepta: dos lecturas independientes que
+        # coinciden en el vacío sí son evidencia de que no estamos ahí.
+        if cfg.releer_si_no_encuentra_nada and skus and not obs.detecciones:
+            log.info("Lectura sin detecciones sobre %d SKU del catálogo; se relee", len(skus))
+            try:
+                bruto2, uso2, ms2 = _llamar_con_reintento(
+                    client, cfg.modelo_primario, mensajes,
+                    temperatura=cfg.temperatura_verificacion,
+                )
+                gasto.sumar(uso2, ms2)
+                obs2 = _normalizar(bruto2, codigos)
+                if obs2.detecciones:
+                    obs, nota = obs2, "relectura: la primera vino sin detecciones"
+                else:
+                    nota = "dos lecturas sin detecciones"
+            except (VisionError, httpx.HTTPError) as exc:
+                log.warning("La relectura falló, se conserva la primera: %s", exc)
+
         # El conteo del lineal se rehace cortando la foto por los rieles y
         # contando bandeja por bandeja (ver `conteo.py`). Pedirle el total
         # de la góndola entera al modelo da ~50% de error; cada bandeja por

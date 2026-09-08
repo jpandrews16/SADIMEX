@@ -567,3 +567,68 @@ def test_finish_reason_length_se_reporta_como_tope_no_como_json_roto(monkeypatch
         vision._llamar_modelo(ClienteFalso(), "modelo-x", [])
 
     assert "12000" in str(exc.value)
+
+
+def test_una_lectura_sin_detecciones_se_relee(skus_min, monkeypatch):
+    """Es el fallo más caro y el más invisible: el JSON llega perfecto con
+    la lista de detecciones vacía. Medido con la misma foto, el mismo
+    prompt y temperatura 0, pasa en 2 de cada 6 llamadas — y aparece como
+    quiebre total de la marca, que manda a un supervisor a una sala bien
+    surtida."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    intentos = {"n": 0}
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        intentos["n"] += 1
+        if intentos["n"] == 1:
+            return _respuesta(0.95, skus=()), {"cost": 0.0001}, 100
+        return _respuesta(0.95), {"cost": 0.0001}, 100
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+
+    obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert intentos["n"] == 2
+    assert [d.sku_codigo for d in obs.detecciones] == ["NOEL-A"]
+    assert "relectura" in (uso.nota_consenso or "")
+
+
+def test_dos_lecturas_sin_detecciones_se_aceptan(skus_min, monkeypatch):
+    """Dos lecturas independientes que coinciden en el vacío sí son
+    evidencia de que no estamos en esa góndola. No se relee para siempre."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+    intentos = {"n": 0}
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        intentos["n"] += 1
+        return _respuesta(0.95, skus=()), {"cost": 0.0001}, 100
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+
+    obs, uso = vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert intentos["n"] == 2
+    assert obs.detecciones == []
+
+
+def test_la_relectura_no_gasta_la_cuota_de_verificacion(skus_min, monkeypatch):
+    """La cuota existe para frenar verificaciones en cascada. Una respuesta
+    en blanco no es un hallazgo dudoso que haya que verificar: es una
+    llamada perdida. Si gastara cuota, con un tercio de fotos en blanco la
+    cuota se agotaría a mitad del lote y el resto se perdería en silencio
+    —que es exactamente lo que pasaba—."""
+    from gondola.app import vision
+
+    monkeypatch.setattr(vision.get_settings(), "openrouter_api_key", "test", raising=False)
+
+    def falsa(_client, modelo, mensajes, temperatura=0.0):
+        return _respuesta(0.95, skus=()), {"cost": 0.0001}, 100
+
+    monkeypatch.setattr(vision, "_llamar_modelo", falsa)
+    vision.analizar_foto(skus_min, "data:image/jpeg;base64,AAA")
+
+    assert vision.cuota_verificacion.estado()["verificaciones"] == 0
