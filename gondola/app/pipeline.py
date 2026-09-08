@@ -87,11 +87,64 @@ def validar_captura(foto: dict, sala: Optional[dict], contenido: bytes) -> Optio
 # =====================================================================
 
 
+def _acotar_al_surtido(
+    skus: list[Sku], cadena_id: Optional[str], categoria: str
+) -> list[Sku]:
+    """Deja solo los SKU que esa cadena efectivamente lleva.
+
+    Es el cambio que más mejoró la lectura, y no toca al modelo. Medido
+    sobre 17 fotos de sala anotadas a mano, con la misma foto, el mismo
+    prompt y el mismo modelo:
+
+        catálogo entero de la categoría (10 SKU)   recall 58%  precisión 41%
+        surtido real de la cadena       ( 6 SKU)   recall 70%  precisión 65%
+
+    Preguntar por un SKU que la cadena no vende no es neutro: el modelo
+    reparte adivinanzas entre todos los envases de la hoja de referencia.
+    Las cuatro variantes de Festival, que no estaban en NINGUNA de las 17
+    fotos, se reportaron en 6 fotos cada una —25 de los 44 falsos
+    positivos—. Y un falso positivo tapa un quiebre real, que es el error
+    caro de este sistema.
+
+    Sin surtido cargado se usa la categoría completa: así cargarlo es
+    opcional y se puede ir haciendo cadena por cadena, aunque hasta que
+    esté cargado esa cadena arrastra los falsos positivos.
+    """
+    if not cadena_id:
+        return skus
+    try:
+        codigos = set(db.traer_surtido(cadena_id, categoria))
+    except Exception as exc:
+        # Sin surtido no se pierde la foto: se analiza contra la categoría.
+        log.warning("No se pudo leer el surtido de la cadena: %s", exc)
+        return skus
+
+    if not codigos:
+        log.info(
+            "La cadena no tiene surtido cargado para '%s'; se usa la categoría "
+            "completa (%d SKU) y la precisión baja",
+            categoria, len(skus),
+        )
+        return skus
+
+    acotados = [s for s in skus if s.codigo in codigos]
+    if not acotados:
+        log.warning(
+            "El surtido de '%s' no coincide con ningún SKU activo de la categoría; "
+            "se usa la categoría completa", categoria,
+        )
+        return skus
+
+    log.info("Surtido de la cadena: %d de %d SKU de '%s'", len(acotados), len(skus), categoria)
+    return acotados
+
+
 def cargar_contexto(categoria: str, sala: Optional[dict] = None) -> Contexto:
     cadena = (sala or {}).get("cadenas") or {}
     cadena_id = cadena.get("id")
 
     skus = skus_desde_filas(db.traer_skus(categoria))
+    skus = _acotar_al_surtido(skus, cadena_id, categoria)
     return Contexto(
         skus=skus,
         reglas=resolver_reglas(skus, db.traer_reglas(), cadena_id),

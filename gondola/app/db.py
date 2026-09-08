@@ -43,6 +43,20 @@ def traer_skus(categoria: Optional[str] = None) -> list[dict]:
     return q.execute().data or []
 
 
+def traer_surtido(cadena_id: str, categoria: str) -> list[str]:
+    """Códigos que esa cadena lleva en esa categoría. Vacío = sin cargar."""
+    filas = (
+        cliente()
+        .table("gondola_surtido_vigente")
+        .select("codigo")
+        .eq("cadena_id", cadena_id)
+        .eq("categoria", categoria)
+        .execute()
+        .data
+    ) or []
+    return [f["codigo"] for f in filas]
+
+
 def traer_reglas() -> list[dict]:
     return cliente().table("gondola_reglas").select("*").eq("activo", True).execute().data or []
 
