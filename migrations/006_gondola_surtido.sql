@@ -59,7 +59,7 @@ CREATE POLICY gondola_surtido_escritura ON gondola_surtido
     USING (
         EXISTS (
             SELECT 1 FROM sadimex_profiles p
-            WHERE p.id = auth.uid() AND p.rol IN ('admin', 'gerencia')
+            WHERE p.id = auth.uid() AND p.rol IN ('admin', 'gerente')
         )
     );
 

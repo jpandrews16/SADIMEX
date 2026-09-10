@@ -228,3 +228,52 @@ def traer_vista(nombre: str, filtros: Optional[dict] = None, limite: int = 1000)
     for columna, valor in (filtros or {}).items():
         q = q.eq(columna, valor)
     return q.limit(limite).execute().data or []
+
+
+# =====================================================================
+# Correcciones: la operación se vuelve verdad de referencia
+# =====================================================================
+
+
+def guardar_correccion(
+    photo_id: str,
+    corregido_por: str,
+    skus_reales: list[str],
+    skus_leidos: list[str],
+    modelo: Optional[str],
+    nota: Optional[str] = None,
+) -> dict:
+    """Registra qué había de verdad en una foto. Una por foto: la última manda."""
+    fila = {
+        "photo_id": photo_id,
+        "corregido_por": corregido_por,
+        "skus_reales": sorted(set(skus_reales)),
+        "skus_leidos": sorted(set(skus_leidos)),
+        "modelo": modelo,
+        # Confirmar que la lectura estaba bien es evidencia igual de
+        # válida que corregirla, y mucho más barata de conseguir. Se
+        # distinguen para no confundirlas al contar.
+        "tipo": "confirmada" if sorted(set(skus_reales)) == sorted(set(skus_leidos)) else "corregida",
+        "nota": nota,
+    }
+    return cliente().table("gondola_correcciones").upsert(
+        fila, on_conflict="photo_id"
+    ).execute().data[0]
+
+
+def traer_correccion(photo_id: str) -> Optional[dict]:
+    filas = (
+        cliente().table("gondola_correcciones").select("*")
+        .eq("photo_id", photo_id).limit(1).execute().data
+    )
+    return filas[0] if filas else None
+
+
+def promover_surtido(min_fotos: int = 3) -> dict:
+    """Pasa al surtido los SKU vistos en suficientes fotos revisadas."""
+    filas = cliente().rpc(
+        "gondola_promover_surtido", {"p_min_fotos": min_fotos}
+    ).execute().data
+    if not filas:
+        return {"accion": "error", "detalle": "el RPC no devolvió resultado"}
+    return filas[0] if isinstance(filas, list) else filas

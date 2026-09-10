@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 
 ROLES_ADMIN = {"admin"}
 ROLES_LECTURA_GERENCIAL = {"admin", "gerente"}
+# Quién puede corregir la lectura de una foto. El reponedor queda afuera a
+# propósito: si pudiera corregir su propia foto estaría calificándose a sí
+# mismo, y la corrección es justo lo que después mide al reponedor.
+ROLES_CORRECCION = {"admin", "gerente", "supervisor"}
 
 
 def _token_del_header(request: Request) -> str:
@@ -68,6 +72,7 @@ def _exige(roles: set[str], etiqueta: str):
 
 requiere_admin = _exige(ROLES_ADMIN, "administrador")
 requiere_gerencia = _exige(ROLES_LECTURA_GERENCIAL, "gerente o administrador")
+requiere_supervisor = _exige(ROLES_CORRECCION, "supervisor, gerente o administrador")
 
 
 def ciudad_del_perfil(perfil: dict) -> Optional[str]:

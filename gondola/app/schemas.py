@@ -237,3 +237,15 @@ class SubirFotoResponse(BaseModel):
     photo_id: str
     estado: str
     alerta_captura: Optional[str] = None
+
+
+class CorreccionRequest(BaseModel):
+    """Lo que de verdad había en la foto, según quien la revisó.
+
+    Se manda la lista COMPLETA de SKU presentes, no las diferencias contra
+    lo que leyó el sistema: las diferencias dependen de qué modelo corrió
+    ese día, y dejarían de significar nada al cambiarlo.
+    """
+
+    skus_reales: list[str] = Field(default_factory=list)
+    nota: Optional[str] = None

@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .admin import router as admin_router
 from .config import get_settings
-from .schemas import SubirFotoRequest, SubirFotoResponse
+from .auth import requiere_gerencia, requiere_supervisor, usuario_actual
+from .schemas import CorreccionRequest, SubirFotoRequest, SubirFotoResponse
 
 cfg = get_settings()
 logging.basicConfig(
@@ -126,3 +127,85 @@ def catalogo(categoria: Optional[str] = None) -> dict:
         "categorias": sorted({s["categoria"] for s in skus}),
         "skus": skus,
     }
+
+
+# =====================================================================
+# Correcciones: la operación se vuelve verdad de referencia
+# =====================================================================
+
+
+@app.post("/api/gondola/analisis/{photo_id}/correccion")
+def corregir_lectura(
+    photo_id: str,
+    cuerpo: CorreccionRequest,
+    perfil: dict = Depends(requiere_supervisor),
+) -> dict:
+    """Registra qué SKU había DE VERDAD en la foto.
+
+    Es el mecanismo por el que el sistema aprende de su propia operación:
+    de acá salen el surtido de cada cadena y la medición de exactitud, sin
+    que nadie tenga que cargar planillas ni anotar fotos a propósito.
+
+    Confirmar una lectura correcta cuenta igual que corregirla: es
+    evidencia más barata de conseguir y sostiene la misma medición.
+    """
+    analisis = db.traer_analisis(photo_id)
+    if analisis is None:
+        raise HTTPException(404, f"La foto {photo_id} todavía no tiene análisis.")
+
+    obs = analisis.get("observacion") or {}
+    leidos = sorted({d["sku_codigo"] for d in (obs.get("detecciones") or [])})
+
+    fila = db.guardar_correccion(
+        photo_id=photo_id,
+        corregido_por=perfil["id"],
+        skus_reales=cuerpo.skus_reales,
+        skus_leidos=leidos,
+        modelo=analisis.get("modelo_usado"),
+        nota=cuerpo.nota,
+    )
+    log.info(
+        "Corrección de %s por %s: leídos %s, reales %s",
+        photo_id, perfil.get("nombre") or perfil["id"], leidos, fila["skus_reales"],
+    )
+    return {
+        "photo_id": photo_id,
+        "tipo": fila["tipo"],
+        "skus_leidos": leidos,
+        "skus_reales": fila["skus_reales"],
+    }
+
+
+@app.get("/api/gondola/exactitud")
+def exactitud(perfil: dict = Depends(usuario_actual)) -> dict:
+    """Cómo viene acertando el lector, por cadena y categoría.
+
+    Sale de las fotos que una persona revisó. Mientras no haya
+    correcciones, viene vacío: es lo honesto: sin fotos revisadas no hay
+    nada que medir.
+    """
+    return {"filas": db.traer_vista("gondola_exactitud", limite=200)}
+
+
+@app.get("/api/gondola/surtido/observado")
+def surtido_observado(perfil: dict = Depends(usuario_actual)) -> dict:
+    """Qué SKU se vieron de verdad en cada cadena, según las correcciones.
+
+    Es el borrador del surtido: lo que el sistema aprendió mirando, para
+    que alguien lo apruebe antes de que empiece a filtrar las lecturas.
+    """
+    return {"filas": db.traer_vista("gondola_surtido_observado", limite=500)}
+
+
+@app.post("/api/gondola/surtido/promover")
+def promover_surtido(
+    min_fotos: int = 3,
+    perfil: dict = Depends(requiere_gerencia),
+) -> dict:
+    """Pasa al surtido vigente los SKU vistos en suficientes fotos revisadas.
+
+    El mínimo existe porque una corrección suelta puede ser un error de
+    quien corrige, y meter un SKU equivocado al surtido es justo el
+    problema que el surtido viene a evitar.
+    """
+    return db.promover_surtido(min_fotos)
